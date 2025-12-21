@@ -7,6 +7,8 @@ qt_standard_project_setup()
 
 qt_add_executable(Own_Design_Pattern
     main.cpp
+    iEasyDevice.h
+    myeasydevice.h myeasydevice.cpp
 )
 
 target_link_libraries(Own_Design_Pattern
