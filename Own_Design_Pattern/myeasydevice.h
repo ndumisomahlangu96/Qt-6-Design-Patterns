@@ -15,16 +15,11 @@ signals:
 
     // iEasyDevice interface
 public:
-
-
-    // iEasyDevice interface
-public:
-   ;
-
-    // iEasyDevice interface
-public:
     void toDevice(QByteArray &data) override;
     QByteArray fromDevice() override;
+
+private:
+    QBuffer m_buffer;
 };
 
 #endif // MYEASYDEVICE_H
