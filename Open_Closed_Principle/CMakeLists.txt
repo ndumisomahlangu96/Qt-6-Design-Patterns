@@ -7,6 +7,9 @@ qt_standard_project_setup()
 
 qt_add_executable(Open_Closed_Principle
     main.cpp
+    Interface/iBrew.h
+    shop.h shop.cpp
+
 )
 
 target_link_libraries(Open_Closed_Principle
