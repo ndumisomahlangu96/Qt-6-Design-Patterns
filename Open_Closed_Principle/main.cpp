@@ -23,11 +23,25 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include "shop.h"
+#include "coffeemachine.h"
+#include "caffeinator3000.h"
 
 
 int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
+
+    Shop shop;
+    QStringList list;
+    list << "Sugar" << "Flavouring";
+
+    // Coffee Machine
+    Caffeinator3000 c3000;
+    shop.sellDrink(list,&c3000);
+
+
+
 
     return a.exec();
 }

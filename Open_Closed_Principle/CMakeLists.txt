@@ -9,6 +9,8 @@ qt_add_executable(Open_Closed_Principle
     main.cpp
     Interface/iBrew.h
     shop.h shop.cpp
+    coffeemachine.h coffeemachine.cpp
+    caffeinator3000.h caffeinator3000.cpp
 
 )
 
