@@ -1,11 +1,6 @@
 # Qt-6-Design-Patterns
-Developers using Qt 6 rely on a specific set of patterns that leverage the framework's modern features (like C++17 support and the new Property System).
+A software design pattern describes a reusable solution to a commonly needed behavior in software.[1] A design pattern is not a rigid structure to be copied directly into source code. Rather, it is a description of and a template for solving a particular type of problem that can be used in many different contexts, including different programming languages and computing platforms.[2] Design patterns can be viewed as formalized best practices that the programmer may use to solve common problems when designing software.
 
-1. The Reactive Observer (New in Qt 6)
-While Qt has always used the Observer Pattern via Signals and Slots, Qt 6 introduced Bindable Properties (QProperty). This allows you to chain data changes automatically without manually emitting signals for every single change.
-
-The Goal: To create "Reactive" UI logic in C++ that behaves like QML or React.
-
-How it works: Instead of manually connecting "Value Changed" signals, you declare a property as "bindable." If A depends on B, and B changes, A updates automatically.
+Object-oriented design patterns typically show relationships and interactions between classes or objects, without specifying the final application classes or objects that are involved.[citation needed] Patterns that imply mutable state may be unsuited for functional programming languages. Some patterns can be rendered unnecessary in languages that have built-in support for solving the problem they are trying to solve, and object-oriented patterns are not necessarily suitable for non-object-oriented languages.
 
 
