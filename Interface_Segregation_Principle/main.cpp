@@ -1,19 +1,54 @@
+/*
+ * What
+ * Interface Segregation Principle
+ *
+ * Define
+ * Clients should not be forced to depend upon interfaces that they do not use
+ *
+ * Why
+ * Adding too much to an interface could cause un-needed code, and undesirable effects.
+ *
+ * Example
+ * Flying things
+ */
+
 #include <QCoreApplication>
+#include "interfaces/iFlying.h"
+#include "interfaces/iMachine.h"
+#include "bird.h"
+#include "airplane.h"
+
+
+void trip (iFlying *obj)
+{
+    obj->fly();
+    obj->land();
+}
+
+void checkFuel(iMachine *obj)
+{
+    obj->refuel();
+}
+
+void testBird()
+{
+    bird Bird;
+    trip(&Bird);
+}
+
+void testPlane()
+{
+    airplane Plane;
+    trip(&Plane);
+    checkFuel(&Plane);
+}
 
 int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
 
-    // Set up code that uses the Qt event loop here.
-    // Call a.quit() or a.exit() to quit the application.
-    // A not very useful example would be including
-    // #include <QTimer>
-    // near the top of the file and calling
-    // QTimer::singleShot(5000, &a, &QCoreApplication::quit);
-    // which quits the application after 5 seconds.
-
-    // If you do not need a running Qt event loop, remove the call
-    // to a.exec() or use the Non-Qt Plain C++ Application template.
+    testBird();
+    testPlane();
 
     return a.exec();
 }

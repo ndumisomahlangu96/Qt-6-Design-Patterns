@@ -12,6 +12,13 @@ class airplane : public QObject, public iFlying, public iMachine
 public:
     explicit airplane(QObject *parent = nullptr);
 
+    //iMachine interface
+    void refuel() override;
+
+    //iFlying interface
+    void fly() override;
+    void land() override;
+
 signals:
 };
 

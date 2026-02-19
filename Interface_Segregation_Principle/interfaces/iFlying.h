@@ -3,8 +3,8 @@
 
 class iFlying{
 public:
-    virtual int fly() = 0;
-    virtual int land() = 0;
+    virtual void fly() = 0;
+    virtual void land() = 0;
 };
 
 #endif // IFLYING_H

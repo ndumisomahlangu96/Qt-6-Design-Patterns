@@ -4,7 +4,7 @@
 
 class iMachine{
 public:
-    virtual int refuel() = 0;
+    virtual void refuel() = 0;
 };
 
 #endif // IMACHINE_H
