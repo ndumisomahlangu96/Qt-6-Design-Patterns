@@ -1,0 +1,26 @@
+#include <QCoreApplication>
+#include <QDebug>
+#include <QVariant>
+#include "myclass.h"
+
+int main(int argc, char *argv[])
+{
+    QCoreApplication a(argc, argv);
+
+    QVariant v = 123.02;
+
+    qDebug() << v.toInt();
+    qDebug() << v.toDouble();
+
+    if(v.canConvert<QString>())
+    {
+        qDebug() << v.toString();
+    }
+
+    myclass cClass;
+    QVariant z = QVariant::fromValue(cClass);
+    myclass zClass = z.value<myclass>();
+
+
+    return a.exec();
+}
