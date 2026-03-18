@@ -18,8 +18,11 @@ int main(int argc, char *argv[])
     }
 
     myclass cClass;
+    cClass.Number = 222;
     QVariant z = QVariant::fromValue(cClass);
     myclass zClass = z.value<myclass>();
+
+    qDebug() << zClass.Number;
 
 
     return a.exec();
