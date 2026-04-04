@@ -20,6 +20,11 @@ public:
     Dialog(QWidget *parent = nullptr);
     ~Dialog();
 
+private slots:
+    void on_pushButtonMakeDirectory_clicked();
+
+    void on_pushButtonDelete_clicked();
+
 private:
     Ui::Dialog *ui;
     QFileSystemModel *model; // Updated type here
