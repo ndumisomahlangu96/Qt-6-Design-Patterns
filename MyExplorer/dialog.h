@@ -2,6 +2,8 @@
 #define DIALOG_H
 
 #include <QDialog>
+#include <QtCore>
+#include <QtGui>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -19,5 +21,7 @@ public:
 
 private:
     Ui::Dialog *ui;
+    QFileSystemModel *dirmodel;
+    QFileSystemModel *filemodel;
 };
 #endif // DIALOG_H
