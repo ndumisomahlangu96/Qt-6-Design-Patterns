@@ -19,6 +19,9 @@ public:
     Dialog(QWidget *parent = nullptr);
     ~Dialog();
 
+private slots:
+    void on_treeView_clicked(const QModelIndex &index);
+
 private:
     Ui::Dialog *ui;
     QFileSystemModel *dirmodel;
