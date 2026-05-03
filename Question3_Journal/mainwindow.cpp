@@ -13,8 +13,6 @@ public:
         return editor;
     }
 };
-// ----------------------------------------------------------------------
-
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -26,21 +24,17 @@ MainWindow::MainWindow(QWidget *parent)
     databaseModel = new QStandardItemModel(this);
     databaseModel->setHorizontalHeaderLabels({"Author", "Year", "Title", "Journal", "Volume", "Issue", "Pages"});
 
-    ui->tableViewDatabase->setModel(databaseModel);
+    // --- PROXY MODEL SETUP ---
+    proxyModel = new QSortFilterProxyModel(this);
+    proxyModel->setSourceModel(databaseModel);
 
-    // Autosize the columns to fit headers and all row content
-    ui->tableViewDatabase->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    // Alternatively, if you want the last column to stretch and fill remaining space:
-    ui->tableViewDatabase->horizontalHeader()->setStretchLastSection(true);
+    // Set the proxy model to the table view instead of the databaseModel
+    ui->tableViewDatabase->setModel(proxyModel);
+    // -----------------------------
 
-    // Prevent the UI year spinbox from exceeding the current year.
     ui->spinBoxYear->setMaximum(QDate::currentDate().year());
     ui->spinBoxYear->setValue(QDate::currentDate().year());
-
-    // Apply the custom delegate to Column 1 ("Year") to restrict in-table edits
     ui->tableViewDatabase->setItemDelegateForColumn(1, new YearDelegate(this));
-
-    // Connect the model's data change signal to our custom slot for dynamic color updates
     connect(databaseModel, &QStandardItemModel::dataChanged, this, &MainWindow::on_modelDataChanged);
 }
 
@@ -56,8 +50,8 @@ void MainWindow::on_pushButtonAdd_clicked()
     QString year = ui->spinBoxYear->text();
     QString title = ui->lineEditTitle->text();
     QString journal = ui->lineEditJournal->text();
-    QString volume = ui->spinBoxVolume->text();
-    QString issue = ui->spinBoxIssue->text();
+    QString volume = ui->lineEditVolume->text();
+    QString issue = ui->lineEditIssue->text();
     QString pages = ui->lineEditPages->text();
 
     // 2. Create a list of QStandardItems to represent a single row.
@@ -88,29 +82,38 @@ void MainWindow::on_pushButtonAdd_clicked()
         }
     }
 
+    // Autosize the columns to fit headers and all row content
+    ui->tableViewDatabase->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    // Alternatively, if you want the last column to stretch and fill remaining space:
+    ui->tableViewDatabase->horizontalHeader()->setStretchLastSection(true);
+
     // 4. Append the new row to the model.
     databaseModel->appendRow(newRow);
 
-    // 5. (Optional) Clear the line edits for the next entry.
+    // 5. Clear the line edits for the next entry.
     ui->lineEditAuthor->clear();
     ui->lineEditTitle->clear();
     ui->lineEditJournal->clear();
     ui->lineEditPages->clear();
+    ui->lineEditVolume->clear();
+    ui->lineEditIssue->clear();
 
     // Reset spinboxes to defaults.
     ui->spinBoxYear->setValue(QDate::currentDate().year());
-    ui->spinBoxVolume->setValue(0);
-    ui->spinBoxIssue->setValue(0);
 }
 
+// --- CRITICAL FIX FOR REMOVE BUTTON ---
 void MainWindow::on_pushButtonRemove_clicked()
 {
-    if (databaseModel->rowCount() == 0) return;
+    if (proxyModel->rowCount() == 0) return;
 
-    QModelIndex currentIndex = ui->tableViewDatabase->currentIndex();
+    // We must get the index from the TableView (which now uses the proxy model)
+    QModelIndex proxyIndex = ui->tableViewDatabase->currentIndex();
 
-    if (currentIndex.isValid()) {
-        databaseModel->removeRow(currentIndex.row());
+    if (proxyIndex.isValid()) {
+        // Map the proxy index back to the underlying database model index
+        QModelIndex sourceIndex = proxyModel->mapToSource(proxyIndex);
+        databaseModel->removeRow(sourceIndex.row());
         ui->tableViewDatabase->clearSelection();
     } else {
         databaseModel->removeRow(databaseModel->rowCount() - 1);
@@ -157,3 +160,45 @@ void MainWindow::on_modelDataChanged(const QModelIndex &topLeft, const QModelInd
         databaseModel->blockSignals(false);
     }
 }
+
+// --- FILTERING LOGIC ---
+void MainWindow::on_pushButtonFind_clicked()
+{
+    // 1. Get the wildcard text from the line edit
+    QString filterText = ui->lineEditWildcard->text();
+
+    // 2. Get the selected column from the combo box
+    int filterColumn = ui->comboBoxFilter->currentIndex();
+
+    // 3. Set the column we want to filter on
+    proxyModel->setFilterKeyColumn(filterColumn);
+
+    // 4. Create a Qt 6 compatible regular expression from the wildcard string
+    QRegularExpression regExp(QRegularExpression::fromWildcard(filterText));
+
+    // Optional: Make the search case-insensitive for better user experience
+    regExp.setPatternOptions(QRegularExpression::CaseInsensitiveOption);
+
+    // 5. Apply the filter
+    proxyModel->setFilterRegularExpression(regExp);
+}
+
+void MainWindow::on_pushButtonReset_clicked()
+{
+    // Clear the search field
+    ui->lineEditWildcard->clear();
+
+    // Clear the filter by passing an empty QRegularExpression
+    proxyModel->setFilterRegularExpression(QRegularExpression());
+}
+
+void MainWindow::on_pushButtonSort_clicked()
+{
+    // 1. Get the selected column index from the combo box
+    int sortColumn = ui->comboBoxFilter->currentIndex();
+
+    // 2. Sort the proxy model based on that column in Ascending Order
+    proxyModel->sort(sortColumn, Qt::AscendingOrder);
+
+}
+
