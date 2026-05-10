@@ -29,8 +29,8 @@ private slots:
     void remove();
 
 private:
-    QStringList *list;
-    QStringListModel *model;
+    QStringList list;
+    QStringListModel model;
 
     void init();
 
