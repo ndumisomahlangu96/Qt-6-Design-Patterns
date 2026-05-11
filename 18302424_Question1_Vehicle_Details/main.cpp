@@ -1,3 +1,10 @@
+/*
+ * PROGRAM NAME: QUESTION1_VEHICLE_DETAILS
+ * AUTHOR: KUTLWANO NDUMISO MAHLANGU
+ * STUDENT NUMBER: 18302424
+ * DATE: 2026/05/06
+ */
+
 #include <QCoreApplication>
 #include <QDebug>
 #include "vehicledetails.h"
