@@ -20,10 +20,26 @@ int main(int argc, char *argv[])
     //Add it to the document
     document.appendChild(root);
 
-    // (Optional) Add a child element so the file isn't completely empty
-    QDomElement book = document.createElement("Book");
-    book.setAttribute("title", "Intro to Modern Qt");
-    root.appendChild(book);
+    //Add it to the document
+    document.appendChild(root);
+
+    //Add some elements
+    for(int i = 0; i < 10; i++)
+    {
+        QDomElement book = document.createElement("Book");
+        book.setAttribute("Name", " My Book " + QString::number(i));
+        book.setAttribute("ID", QString::number(i));
+        root.appendChild(book);
+
+        for(int h = 0; h < 10; h++)
+        {
+            QDomElement chapter = document.createElement("Chapter");
+            chapter.setAttribute("Name", " My Chapter " + QString::number(h));
+            chapter.setAttribute("ID", QString::number(i));
+            root.appendChild(chapter);
+        }
+    }
+
 
     // --- 2. Setup the Dynamic File Path ---
     // Safely find the user's standard 'Documents' folder on any Windows machine
@@ -48,16 +64,15 @@ int main(int argc, char *argv[])
     QFile file(filePath);
 
     // Open the file in WriteOnly mode, formatting as Text
-    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QTextStream stream(&file);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qDebug() <<  "Finished to open file for writing";
+        return -1;
 
-        // Write the document to the stream. The '4' dictates standard 4-space indentation.
-        stream << document.toString(4);
-
-        file.close();
-        qDebug() << "Success! XML file written to:" << filePath;
     } else {
-        qDebug() << "Error opening file for writing:" << file.errorString();
+        QTextStream stream (&file);
+        stream << document.toString();
+        file.close();
+        qDebug() << "Finished";
     }
 
 
