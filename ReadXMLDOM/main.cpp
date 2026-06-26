@@ -7,6 +7,25 @@
 #include <QTextStream>
 
 // DOM method of reading xml
+void ListElements(QDomElement root, QString tagname, QString attribute)
+{
+    // elementsByTagName dynamically finds only the subchildren within the provided root element
+    QDomNodeList items = root.elementsByTagName(tagname);
+    qDebug() << "Total items =" << items.count();
+
+    for(int i = 0; i < items.count(); i++)
+    {
+        QDomNode itemnode = items.at(i);
+
+        //convert to element
+        if(itemnode.isElement())
+        {
+            QDomElement itemelement = itemnode.toElement();
+            // trimmed() is optional but cleans up the leading space in " My Chapter"
+            qDebug() << itemelement.attribute(attribute).trimmed();
+        }
+    }
+}
 
 int main(int argc, char *argv[])
 {
@@ -15,12 +34,8 @@ int main(int argc, char *argv[])
     //Write XML
     QDomDocument document;
 
-
     //Make the root element
     QDomElement rootWrite = document.createElement("Books");
-
-    //Add it to the document
-    document.appendChild(rootWrite);
 
     //Add it to the document
     document.appendChild(rootWrite);
@@ -36,12 +51,13 @@ int main(int argc, char *argv[])
         for(int h = 0; h < 10; h++)
         {
             QDomElement chapter = document.createElement("Chapter");
-            chapter.setAttribute("Name", " My Chapter " + QString::number(h));
+            chapter.setAttribute("Name", "My Chapter " + QString::number(h));
             chapter.setAttribute("ID", QString::number(i));
-            rootWrite.appendChild(chapter);
+
+            // FIX: Append the chapter to the 'book' node so it becomes a subchild
+            book.appendChild(chapter);
         }
     }
-
 
     // --- 2. Setup the Dynamic File Path ---
     // Safely find the user's standard 'Documents' folder on any Windows machine
@@ -67,14 +83,14 @@ int main(int argc, char *argv[])
 
     // Open the file in WriteOnly mode, formatting as Text
     if (!fileWrite.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        qDebug() <<  "Finished to open file for writing.";
+        qDebug() <<  "Failed to open file for writing.";
         return -1;
 
     } else {
         QTextStream stream (&fileWrite);
         stream << document.toString();
         fileWrite.close();
-        qDebug() << "Finished to closing file for writing.";
+        qDebug() << "Finished closing file for writing.";
     }
 
     // Load the file
@@ -97,6 +113,28 @@ int main(int argc, char *argv[])
     //get the root element
     QDomElement rootRead = document.firstChildElement();
 
+    // List the books.
+    qDebug() << "--- Listing Root Books ---";
+    ListElements(rootRead, "Book", "Name");
+
+    qDebug() << "\r\n--- More Advanced: Reading Subchildren ---";
+
+    // Get the chapters
+    QDomNodeList books = rootRead.elementsByTagName("Book");
+    for (int i = 0; i < books.count(); i++)
+    {
+        QDomNode booknode = books.at(i);
+        //convert to an element
+        if(booknode.isElement())
+        {
+            QDomElement book = booknode.toElement();
+            qDebug() << "\nChapters in" << book.attribute("Name").trimmed() << ":";
+
+            // Pass the specific book node in as the root to count its internal subchildren
+            ListElements(book, "Chapter", "Name");
+        }
+    }
+    qDebug() << "\nFinished Reading XML file.";
 
     return QCoreApplication::exec();
 }
