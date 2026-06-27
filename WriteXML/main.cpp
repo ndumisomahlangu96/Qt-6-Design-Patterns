@@ -36,7 +36,8 @@ int main(int argc, char *argv[])
             QDomElement chapter = document.createElement("Chapter");
             chapter.setAttribute("Name", " My Chapter " + QString::number(h));
             chapter.setAttribute("ID", QString::number(i));
-            root.appendChild(chapter);
+            // FIX: Append the chapter to the 'book' node so it becomes a subchild
+            book.appendChild(chapter);
         }
     }
 
