@@ -1,5 +1,4 @@
 #include "mainwindow.h"
-#include <QList>
 
 // ==========================================
 // SINGLETON: SHAPE MANAGER
@@ -147,12 +146,9 @@ MainWindow::MainWindow(QWidget *parent)
     pushButtonNextShape = new QPushButton("Next Shape");
     pushButtonNextShape->setEnabled(false);
 
-    pushButtonXMLShape = new QPushButton("Load Shapes From XML");
-
-    bottomLayout->addWidget(graphicsShapeView, 0, 0, 1, 3);
+    bottomLayout->addWidget(graphicsShapeView, 0, 0, 1, 2);
     bottomLayout->addWidget(pushButtonPreviousShape, 1, 0);
     bottomLayout->addWidget(pushButtonNextShape, 1, 1);
-    bottomLayout->addWidget(pushButtonXMLShape,1,2);
 
     mainLayout->addLayout(topLayout, 0, 0);
     mainLayout->addLayout(middleLayout, 1, 0);
@@ -165,9 +161,12 @@ MainWindow::MainWindow(QWidget *parent)
     connect(comboBoxShape, &QComboBox::currentTextChanged, this, &MainWindow::onShapeSelectionChanged);
     connect(pushButtonPreviousShape, &QPushButton::clicked, this, &MainWindow::onPreviousShapeClicked);
     connect(pushButtonNextShape, &QPushButton::clicked, this, &MainWindow::onNextShapeClicked);
-    connect(pushButtonXMLShape, &QPushButton::clicked, this, &MainWindow::WriteAndReadXMLShapeFile);
 
+    // Set initial UI state
     onShapeSelectionChanged(comboBoxShape->currentText());
+
+    // --- NEW LOGIC: Load XML Shapes Immediately on Startup ---
+    loadShapesOnStartup();
 }
 
 MainWindow::~MainWindow() = default;
@@ -339,7 +338,8 @@ void MainWindow::ListElements(const QDomElement &root)
     }
 }
 
-void MainWindow::WriteAndReadXMLShapeFile()
+// Renamed from WriteAndReadXMLShapeFile and handles the automated startup logic
+void MainWindow::loadShapesOnStartup()
 {
     QDomDocument document;
     QDomElement rootWrite = document.createElement("shapeList");

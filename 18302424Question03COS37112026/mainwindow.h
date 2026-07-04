@@ -32,14 +32,9 @@ private slots:
     void onCreateShapeClicked();
     void onShapeSelectionChanged(const QString &shape);
 
-    // --- New Navigation Slots ---
+    // Navigation Slots
     void onPreviousShapeClicked();
     void onNextShapeClicked();
-
-    // XML parsing helper functions
-    void addShape(QDomDocument& document, QDomElement& root, const QString& type, const QString& pw, const QString& pc, const QString& fc, const QString& p1, const QString& p2);
-    void ListElements(const QDomElement& root);
-    void WriteAndReadXMLShapeFile();
 
 private:
     QGraphicsScene *scene;
@@ -55,11 +50,14 @@ private:
     QLabel *labelProperty2;
     QGraphicsView *graphicsShapeView;
 
-    // --- Promoted to class members ---
     QPushButton *pushButtonPreviousShape;
     QPushButton *pushButtonNextShape;
     QPushButton *pushButtonCreateShape;
-    QPushButton *pushButtonXMLShape;
+
+    // XML parsing and startup helper functions
+    void addShape(QDomDocument& document, QDomElement& root, const QString& type, const QString& pw, const QString& pc, const QString& fc, const QString& p1, const QString& p2);
+    void ListElements(const QDomElement& root);
+    void loadShapesOnStartup();
 
     // Helper function to map combobox string to QColor
     QColor getColorFromName(const QString &name);
