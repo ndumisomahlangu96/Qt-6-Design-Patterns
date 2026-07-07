@@ -499,13 +499,16 @@ void MainWindow::onRestoreShapeClicked()
     // Restore QList Application state
     ShapeManager::getInstance().restoreState(memento->savedShapes, memento->currentIndex);
 
-    // REQUIREMENT: Display the FIRST shape in the QList upon restoring
+    // REQUIREMENT: Display the LAST shape in the QList upon restoring
     if (ShapeManager::getInstance().getCount() > 0) {
-        ShapeManager::getInstance().setCurrentIndex(0); // Set strictly to index 0
+        // Set the index strictly to the last available position
+        int lastIndex = ShapeManager::getInstance().getCount() - 1;
+        ShapeManager::getInstance().setCurrentIndex(lastIndex);
+
         scene->clear();
-        Shape* firstShape = ShapeManager::getInstance().getCurrent();
-        if (firstShape) {
-            firstShape->draw(scene);
+        Shape* lastShape = ShapeManager::getInstance().getCurrent();
+        if (lastShape) {
+            lastShape->draw(scene);
         }
     } else {
         scene->clear();
