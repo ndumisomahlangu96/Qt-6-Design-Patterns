@@ -9,7 +9,6 @@
 #include <QPushButton>
 #include <QMenuBar>
 #include <QStatusBar>
-#include <QIcon>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 
@@ -40,5 +39,9 @@ private:
 
     QMenuBar *menubar;
     QStatusBar *statusbar;
+
+private slots:
+    // This is the function that will run when the button is clicked
+    void AddStudentClick();
 };
 #endif // MAINWINDOW_H

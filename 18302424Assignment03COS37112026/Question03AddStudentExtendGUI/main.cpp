@@ -1,10 +1,3 @@
-/*
- * STUDENT NUMBER: 18302424
- * AUTHOR: KUTLWANO NDUMISO MAHLANGU
- * PROGRAM: STUDENT GRAPHICAL USER INTERFACE
- * DATE: 2026/08/03
- */
-
 #include "mainwindow.h"
 
 #include <QApplication>

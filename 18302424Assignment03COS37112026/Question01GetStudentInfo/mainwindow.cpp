@@ -18,7 +18,7 @@ MainWindow::MainWindow(QWidget *parent)
     gridLayout = new QGridLayout();
 
     // --- Row 0: Student Number ---
-    labelStudentNumber = new QLabel("Student Number:", centralwidget);
+    labelStudentNumber = new QLabel("🆔 Student Number:", centralwidget);
     lineEditStudentNumber = new QLineEdit(centralwidget);
     lineEditStudentNumber->setPlaceholderText("Please enter your 4-digit student number (e.g., 1234)");
 
@@ -32,7 +32,7 @@ MainWindow::MainWindow(QWidget *parent)
     gridLayout->addWidget(lineEditStudentNumber, 0, 1);
 
     // --- Row 1: Module Code ---
-    labelModuleCode = new QLabel("Module Code:", centralwidget);
+    labelModuleCode = new QLabel("📚 Module Code:", centralwidget);
     lineEditModuleCode = new QLineEdit(centralwidget);
     // Updated placeholder to reflect the 7-character rule instead of 6
     lineEditModuleCode->setPlaceholderText("Enter a 7-character module code (e.g., COS3711).");
@@ -47,7 +47,7 @@ MainWindow::MainWindow(QWidget *parent)
     gridLayout->addWidget(lineEditModuleCode, 1, 1);
 
     // --- Row 2: Mark ---
-    labelMark = new QLabel("Mark:", centralwidget);
+    labelMark = new QLabel("🎓 Mark:", centralwidget);
     spinBoxMark = new QSpinBox(centralwidget);
     spinBoxMark->setMaximum(100);
 
@@ -58,9 +58,7 @@ MainWindow::MainWindow(QWidget *parent)
     gridLayout_2->addLayout(gridLayout, 0, 0);
 
     // 6. Add Student button
-    pushButtonAddStudent = new QPushButton("Add Student", centralwidget);
-    // Since CMake is configured for Qt6, we can safely use QIcon::ThemeIcon enumerations
-    pushButtonAddStudent->setIcon(QIcon::fromTheme(QIcon::ThemeIcon::ListAdd));
+    pushButtonAddStudent = new QPushButton("✅Add Student", centralwidget);
     pushButtonAddStudent->setAutoDefault(true);
 
     gridLayout_2->addWidget(pushButtonAddStudent, 1, 0);
@@ -71,6 +69,23 @@ MainWindow::MainWindow(QWidget *parent)
 
     statusbar = new QStatusBar(this);
     this->setStatusBar(statusbar);
+
+    connect(pushButtonAddStudent,&QPushButton::clicked,this,&MainWindow::AddStudentClick);
 }
 
 MainWindow::~MainWindow() = default;
+
+void MainWindow::AddStudentClick()
+{
+    // Extract the text and integer from the specific GUI components
+    QString studentNum = lineEditStudentNumber->text();
+    QString moduleCode = lineEditModuleCode->text();
+    int mark = spinBoxMark->value();
+
+    // Bind a QTextStream directly to the standard output (stdout)
+    QTextStream out(stdout);
+
+    // Pass the comma-separated string and use Qt::endl
+    // Qt::endl automatically flushes the buffer, pushing data to QProcess!
+    out << studentNum << "," << moduleCode << "," << mark << Qt::endl;
+}

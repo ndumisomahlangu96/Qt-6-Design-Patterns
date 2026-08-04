@@ -4,6 +4,9 @@
 #include <QMainWindow>
 #include <QPushButton>
 #include <QTextEdit>
+#include <QVBoxLayout>
+#include <QWidget>
+#include <QStringList>
 #include "getstudentinformation.h"
 
 class MainWindow : public QMainWindow
