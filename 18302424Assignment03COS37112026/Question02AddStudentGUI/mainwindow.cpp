@@ -7,7 +7,7 @@ MainWindow::MainWindow(QWidget *parent)
     QWidget *centralWidget = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(centralWidget);
 
-    btnStartProcess = new QPushButton("▶️Run Question01GetStudentInfo", this);
+    btnStartProcess = new QPushButton("▶️Run Question01GetStudentInfo.exe", this);
     textDisplay = new QTextEdit(this);
     textDisplay->setReadOnly(true); // Ensures the display remains read-only
 
