@@ -38,8 +38,8 @@ MainWindow::MainWindow(QWidget *parent)
     lineEditModuleCode->setPlaceholderText("Enter a 7-character module code (e.g., COS3711).");
 
     // Add Input Mask and Regular Expression Validator for Module Code
-    // Mask rule: > (uppercase), AAA (3 required letters), 000 (3 required digits), N (1 required alphanumeric)
-    QRegularExpression rxModule("^[A-Z]{3}[1-3][0-9]{3}$");
+    // Mask rule: 3 uppercase letters, a 1-3 digit, 2 digits, and 1 final alphanumeric character.
+    QRegularExpression rxModule("^[A-Z]{3}[1-3][0-9]{2}[A-Za-z0-9]$");
     QRegularExpressionValidator *valModule = new QRegularExpressionValidator(rxModule, this);
     lineEditModuleCode->setValidator(valModule);
 

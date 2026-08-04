@@ -1,3 +1,10 @@
+/*
+ * STUDENT NUMBER: 18302424
+ * AUTHOR: KUTLWANO NDUMISO MAHLANGU
+ * PROGRAM NAME: STUDENT ACADEMIC RECORD
+ * DATE: 2026/08/04
+ */
+
 #include "mainwindow.h"
 
 #include <QApplication>

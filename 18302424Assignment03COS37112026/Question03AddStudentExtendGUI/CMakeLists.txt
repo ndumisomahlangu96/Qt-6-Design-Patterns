@@ -10,6 +10,9 @@ qt_add_executable(Question03AddStudentExtendGUI
     main.cpp
     mainwindow.cpp
     mainwindow.h
+    getstudentinformation.h getstudentinformation.cpp
+    student.h student.cpp
+    studentlist.h studentlist.cpp
 
 )
 
