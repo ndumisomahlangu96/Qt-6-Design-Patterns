@@ -16,7 +16,7 @@ QString Student::getNumber() const
 
 void Student::addModule(const QString &moduleCode, int mark)
 {
-    // Inserts or updates the module mark[cite: 7]
+    // Inserts or updates the module mark
     modulesAndMarks.insert(moduleCode, mark);
 }
 
@@ -42,29 +42,33 @@ bool Student::graduate() const
     int firstYearCount = 0;
     int thirdYearCount = 0;
 
+    // Regex to validate the module format:
+    // ^[A-Z]{3}     : Exactly 3 uppercase alphabetic characters
+    // [123]         : A 1, 2, or 3 indicating the year
+    // \\d{2}        : Exactly 2 digits
+    // [A-Za-z0-9]$  : A final alphabetic or numeric character
+    QRegularExpression moduleValidator("^[A-Z]{3}[123]\\d{2}[A-Za-z0-9]$");
+
     QHashIterator<QString, int> i(modulesAndMarks);
     while (i.hasNext()) {
         i.next();
 
-        // Assuming >= 50 is a pass
-        if (i.value() >= 50) {
+        // Check if the mark is a pass (>= 50) and if the module code matches the specific pattern
+        if (i.value() >= 50 && moduleValidator.match(i.key()).hasMatch()) {
             passedCount++;
-            QString code = i.key();
 
-            // Validate module code length based on rules:
-            // 3 Upper Alpha + 1 Year Digit + 2 Digits + 1 Char = 7 characters total
-            if (code.length() == 7) {
-                QChar yearChar = code.at(3); // The 4th character denotes the year
-                if (yearChar == '1') {
-                    firstYearCount++;
-                } else if (yearChar == '3') {
-                    thirdYearCount++;
-                }
+            // The 4th character denotes the year
+            QChar yearChar = i.key().at(3);
+
+            if (yearChar == '1') {
+                firstYearCount++;
+            } else if (yearChar == '3') {
+                thirdYearCount++;
             }
         }
     }
 
-    // Must pass at least 5 modules, <= 2 first-year modules, and >= 1 third-year module
+    // Must pass at least 5 modules in total, with at most 2 first-year modules, and at least 1 third-year module
     return (passedCount >= 5 && firstYearCount <= 2 && thirdYearCount >= 1);
 }
 

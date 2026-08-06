@@ -15,13 +15,13 @@ MainWindow::MainWindow(QWidget *parent)
     QRegularExpressionValidator *rvalStudent = new QRegularExpressionValidator(rexpStudent,this);
     editStudentNumber->setValidator(rvalStudent);
     editStudentNumber->setPlaceholderText("Please enter your 4-digit student number (e.g., 1234)");
-    formLayout->addRow("Student Number:", editStudentNumber);
+    formLayout->addRow("🆔 Student Number:", editStudentNumber);
 
     // Setup horizontal layout for action buttons
     QHBoxLayout *buttonLayout = new QHBoxLayout();
-    btnDisplayRecord = new QPushButton("Display Record", this);
-    btnGetAverage = new QPushButton("Get Average", this);
-    btnCheckGraduation = new QPushButton("Check Graduation", this);
+    btnDisplayRecord = new QPushButton("📋🔍 Display Record", this);
+    btnGetAverage = new QPushButton("📊🔍 Get Average", this);
+    btnCheckGraduation = new QPushButton("🎓✅ Check Graduation", this);
 
     buttonLayout->addWidget(btnDisplayRecord);
     buttonLayout->addWidget(btnGetAverage);
@@ -40,10 +40,10 @@ MainWindow::MainWindow(QWidget *parent)
 
     setCentralWidget(centralWidget);
 
-    // Initialize logic class[cite: 23]
+    // Initialize logic class
     studentInfo = new GetStudentInformation(this);
 
-    // Connect standard process buttons[cite: 23]
+    // Connect standard process buttons
     connect(btnStartProcess, &QPushButton::clicked, studentInfo, &GetStudentInformation::startSeparateProgram);
     connect(studentInfo, &GetStudentInformation::outputGUI, this, &MainWindow::displayOutput);
 
@@ -60,10 +60,10 @@ MainWindow::~MainWindow() = default;
 
 void MainWindow::displayOutput(const QString &output)
 {
-    // Clean any trailing newline characters captured from QProcess[cite: 23]
+    // Clean any trailing newline characters captured from QProcess
     QString cleanOutput = output.trimmed();
 
-    // Assuming Question01 outputs data in a CSV format: "StudentNum,ModuleCode,Mark"[cite: 23]
+    // Assuming Question01 outputs data in a CSV format: "StudentNum,ModuleCode,Mark"
     QStringList studentData = cleanOutput.split(",");
 
     if (studentData.size() >= 3) {
@@ -71,11 +71,11 @@ void MainWindow::displayOutput(const QString &output)
         QString modCode = studentData[1].trimmed();
         int mark = studentData[2].trimmed().toInt();
 
-        // 1. Search for the student in the singleton list[cite: 23]
+        // 1. Search for the student in the singleton list
         int index = StudentList::getInstance().findStudent(stdNum);
         Student* currentStudent = nullptr;
 
-        // 2. Fetch the student if they exist, or create and append if they don't[cite: 23]
+        // 2. Fetch the student if they exist, or create and append if they don't
         if (index != -1) {
             currentStudent = StudentList::getInstance().getStudent(index);
         } else {
@@ -83,10 +83,10 @@ void MainWindow::displayOutput(const QString &output)
             StudentList::getInstance().addStudent(currentStudent);
         }
 
-        // 3. Save the module and integer mark[cite: 23]
+        // 3. Save the module and integer mark
         currentStudent->addModule(modCode, mark);
 
-        // Standard format to separate different Student Information[cite: 23]
+        // Standard format to separate different Student Information
         QString formattedRecord = QString(
                                       "========================================\n"
                                       " STUDENT INFORMATION RECORD\n"
@@ -162,7 +162,7 @@ void MainWindow::checkGraduation()
 
     Student* student = StudentList::getInstance().getStudent(index);
 
-    // Checks if passed 5 modules (max 2 first-year, min 1 third-year)[cite: 25]
+    // Checks if passed 5 modules (max 2 first-year, min 1 third-year)
     bool qualifies = student->graduate();
 
     if (qualifies) {

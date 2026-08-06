@@ -5,6 +5,8 @@
 #include <QHash>
 #include <QString>
 #include <QDebug>
+#include <QRegularExpression>
+
 
 class Student : public QObject
 {
