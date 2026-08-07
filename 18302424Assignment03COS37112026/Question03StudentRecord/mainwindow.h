@@ -11,7 +11,6 @@
 #include <QStringList>
 #include <QLineEdit>
 #include <QSpinBox>
-#include <QMessageBox>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include "getstudentinformation.h"

@@ -1,3 +1,11 @@
+/*
+ * STUDENT NUMBER: 18302424
+ * AUTHOR: KUTLWANO NDUMISO MAHLANGU
+ * PROGRAM NAME: STUDENT ACADEMIC RECORD XML
+ * DATE: 2026/08/06
+ */
+
+
 #include "mainwindow.h"
 
 #include <QApplication>
