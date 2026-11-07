@@ -22,7 +22,7 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QTextStream>
-
+#include <QStyle>
 #include <QMenu>
 #include <QAction>
 #include <QKeySequence>
@@ -30,6 +30,7 @@
 // New Includes for standard application features
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QInputDialog>
 
 // QtCharts headers
 #include <QtCharts/QChartView>
@@ -64,12 +65,14 @@ private slots:
     void onExit();
     void onDeleteSelected();
     void onAbout();
+    void onSortLedger();
 
 private:
     Ui::MainWindow *ui;
 
     // Data Model
     QStandardItemModel *expenseModel;
+    QString currentFilePath; // Add this variable to track the active file
 
     // UI Components
     QComboBox *projectCombo;
@@ -90,7 +93,6 @@ private:
     void setupMenuBar(); // Helper for menu setup
 
     // Storage
-    void loadData();
     QString getDataFilePath();
 };
 #endif // MAINWINDOW_H
