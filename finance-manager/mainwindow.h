@@ -31,6 +31,7 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QDialog>
 
 // QtCharts headers
 #include <QtCharts/QChartView>
@@ -66,6 +67,8 @@ private slots:
     void onDeleteSelected();
     void onAbout();
     void onSortLedger();
+    void onFind(); // New find slot added here
+    void onPieSliceClicked(QPieSlice *slice); // New slot for interactivity
 
 private:
     Ui::MainWindow *ui;

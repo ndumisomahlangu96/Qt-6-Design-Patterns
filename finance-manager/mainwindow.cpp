@@ -80,6 +80,14 @@ void MainWindow::setupMenuBar()
     connect(sortAction, &QAction::triggered, this, &MainWindow::onSortLedger);
     editMenu->addAction(sortAction);
 
+    // --- Find Action ---
+    // Attempts to load the standard OS magnifier icon ("edit-find"), defaults to a list view icon if unavailable
+    QAction *findAction = new QAction(QIcon::fromTheme("edit-find", style->standardIcon(QStyle::SP_FileDialogContentsView)), "Find...", this);
+    findAction->setShortcut(QKeySequence::Find);
+    findAction->setStatusTip("Search the database for a specific variable");
+    connect(findAction, &QAction::triggered, this, &MainWindow::onFind);
+    editMenu->addAction(findAction);
+
     // --- Help Menu ---
     QMenu *helpMenu = ui->menubar->addMenu("Help");
 
@@ -133,7 +141,9 @@ void MainWindow::saveData()
         currentFilePath = savePath;
 
         ui->statusbar->showMessage("Data saved successfully to: " + currentFilePath, 3000);
-    } else {
+    }
+    else
+    {
         ui->statusbar->showMessage("Failed to save data.", 3000);
     }
 }
@@ -234,7 +244,17 @@ void MainWindow::openFile()
         if (fields.size() >= 5) {
             QList<QStandardItem *> newRow;
             for (int col = 0; col < 5; ++col) {
-                newRow << new QStandardItem(fields[col]);
+                QStandardItem *item = new QStandardItem(fields[col]);
+
+                if (col == 4) {
+                    // Store Amount column as a double for sorting calculations
+                    item->setData(fields[col].toDouble(), Qt::UserRole);
+                } else {
+                    // Store Date, Project/Site, Category, and Description as strings
+                    item->setData(fields[col], Qt::UserRole);
+                }
+
+                newRow << item;
             }
             expenseModel->appendRow(newRow);
         }
@@ -250,6 +270,12 @@ void MainWindow::setupModel()
 {
     expenseModel = new QStandardItemModel(0, 5, this);
     expenseModel->setHorizontalHeaderLabels({"Date", "Project/Site", "Category", "Description", "Amount"});
+
+    // Enable sorting by actual data types (double for amount, string for others)
+    expenseModel->setSortRole(Qt::UserRole);
+
+    // Automatically update the visual dashboard when manual edits are made in the ledger view
+    connect(expenseModel, &QStandardItemModel::itemChanged, this, &MainWindow::updateChart);
 }
 
 void MainWindow::setupFlexibleUI()
@@ -268,11 +294,11 @@ void MainWindow::setupFlexibleUI()
 
     projectCombo = new QComboBox();
     projectCombo->setEditable(true);
-    projectCombo->addItems({"Site A", "Property 102", "General Overhead"});
+    projectCombo->addItems({"Rental Property", "Residential Property", "General Overhead"});
 
     categoryCombo = new QComboBox();
     categoryCombo->setEditable(true);
-    categoryCombo->addItems({"Raw Materials", "Maintenance", "Marketing", "Fuel","Human Labour"});
+    categoryCombo->addItems({"Raw Materials", "Maintenance", "Equipment", "Fuel","Human Labour"});
 
     amountSpin = new QDoubleSpinBox();
     amountSpin->setMaximum(9999999.99);
@@ -309,7 +335,12 @@ void MainWindow::setupFlexibleUI()
     QVBoxLayout *dashboardLayout = new QVBoxLayout(dashboardTab);
 
     categorySeries = new QPieSeries();
+
+    // Connect the slice click signal to our new drill-down slot
+    connect(categorySeries, &QPieSeries::clicked, this, &MainWindow::onPieSliceClicked);
+
     expenseChart = new QChart();
+    expenseChart->addSeries(categorySeries);
     expenseChart->addSeries(categorySeries);
     expenseChart->setTitle("Expenses by Category");
     expenseChart->setAnimationOptions(QChart::SeriesAnimations);
@@ -330,11 +361,26 @@ void MainWindow::setupFlexibleUI()
 void MainWindow::onAddExpenseClicked()
 {
     QList<QStandardItem *> newRow;
-    newRow << new QStandardItem(dateEdit->date().toString("yyyy-MM-dd"));
-    newRow << new QStandardItem(projectCombo->currentText());
-    newRow << new QStandardItem(categoryCombo->currentText());
-    newRow << new QStandardItem(descriptionEdit->text());
-    newRow << new QStandardItem(QString::number(amountSpin->value(), 'f', 2));
+
+    QStandardItem *dateItem = new QStandardItem(dateEdit->date().toString("yyyy-MM-dd"));
+    dateItem->setData(dateItem->text(), Qt::UserRole);
+    newRow << dateItem;
+
+    QStandardItem *projectItem = new QStandardItem(projectCombo->currentText());
+    projectItem->setData(projectItem->text(), Qt::UserRole);
+    newRow << projectItem;
+
+    QStandardItem *categoryItem = new QStandardItem(categoryCombo->currentText());
+    categoryItem->setData(categoryItem->text(), Qt::UserRole);
+    newRow << categoryItem;
+
+    QStandardItem *descItem = new QStandardItem(descriptionEdit->text());
+    descItem->setData(descItem->text(), Qt::UserRole);
+    newRow << descItem;
+
+    QStandardItem *amountItem = new QStandardItem(QString::number(amountSpin->value(), 'f', 2));
+    amountItem->setData(amountSpin->value(), Qt::UserRole); // Store explicitly as double for numeric sorting
+    newRow << amountItem;
 
     expenseModel->appendRow(newRow);
 
@@ -470,4 +516,104 @@ void MainWindow::onSortLedger()
             ui->statusbar->showMessage(QString("Ledger sorted by %1.").arg(item), 3000);
         }
     }
+}
+
+void MainWindow::onFind()
+{
+    bool ok;
+    QString searchText = QInputDialog::getText(this, "Find Variable",
+                                               "Enter text or number to find:", QLineEdit::Normal,
+                                               "", &ok);
+
+    if (ok && !searchText.isEmpty()) {
+        QModelIndex foundIndex;
+
+        // Iterate through rows and columns to find the variable
+        for (int row = 0; row < expenseModel->rowCount(); ++row) {
+            for (int col = 0; col < expenseModel->columnCount(); ++col) {
+                QModelIndex index = expenseModel->index(row, col);
+                // Check if the cell contains the searched string (case-insensitive)
+                if (index.data().toString().contains(searchText, Qt::CaseInsensitive)) {
+                    foundIndex = index;
+                    break;
+                }
+            }
+            if (foundIndex.isValid()) {
+                break; // Stop searching once the first match is found
+            }
+        }
+
+        if (foundIndex.isValid()) {
+            // Automatically switch to the Ledger Reports tab (Index 1) so the user can see the highlighted variable
+            QTabWidget *tabWidget = this->findChild<QTabWidget*>();
+            if (tabWidget) {
+                tabWidget->setCurrentIndex(1);
+            }
+
+            // Highlight the cell and scroll to it
+            ledgerView->selectionModel()->select(foundIndex, QItemSelectionModel::ClearAndSelect);
+            ledgerView->scrollTo(foundIndex);
+
+            ui->statusbar->showMessage("Found match for '" + searchText + "'.", 3000);
+        } else {
+            QMessageBox::information(this, "Not Found", "Could not find '" + searchText + "' in the database.");
+        }
+    }
+}
+
+void MainWindow::onPieSliceClicked(QPieSlice *slice)
+{
+    // The slice label is formatted as "Category: R Amount".
+    // We extract the exact category name by splitting at the colon.
+    QString category = slice->label().section(':', 0, 0).trimmed();
+
+    QMap<QString, double> projectTotals;
+
+    // Scan the model and aggregate spending by Project for the clicked Category
+    for (int row = 0; row < expenseModel->rowCount(); ++row) {
+        QString rowCategory = expenseModel->item(row, 2)->text();
+        if (rowCategory == category) {
+            QString project = expenseModel->item(row, 1)->text();
+            double amount = expenseModel->item(row, 4)->text().toDouble();
+            projectTotals[project] += amount;
+        }
+    }
+
+    // Create a new modal dialog to display the secondary breakdown chart
+    QDialog *dialog = new QDialog(this);
+    dialog->setWindowTitle(category + " - Project Breakdown");
+    dialog->resize(500, 400);
+
+    QPieSeries *projectSeries = new QPieSeries();
+
+    // Populate the sub-chart series
+    for (auto it = projectTotals.begin(); it != projectTotals.end(); ++it) {
+        QPieSlice *pSlice = projectSeries->append(it.key(), it.value());
+        pSlice->setLabelVisible(true);
+        pSlice->setLabel(QString("%1: R %2").arg(it.key()).arg(it.value(), 0, 'f', 2));
+    }
+
+    QChart *projectChart = new QChart();
+    projectChart->addSeries(projectSeries);
+    projectChart->setTitle(QString("Budget Distribution for '%1'").arg(category));
+    projectChart->setAnimationOptions(QChart::SeriesAnimations);
+    projectChart->legend()->setAlignment(Qt::AlignBottom);
+
+    QChartView *pChartView = new QChartView(projectChart);
+    pChartView->setRenderHint(QPainter::Antialiasing);
+
+    // Layout the dialog
+    QVBoxLayout *layout = new QVBoxLayout(dialog);
+    layout->addWidget(pChartView);
+
+    // Add a close button
+    QPushButton *closeBtn = new QPushButton("Close");
+    connect(closeBtn, &QPushButton::clicked, dialog, &QDialog::accept);
+    layout->addWidget(closeBtn, 0, Qt::AlignRight);
+
+    // Execute the dialog modally
+    dialog->exec();
+
+    // Clean up
+    delete dialog;
 }
