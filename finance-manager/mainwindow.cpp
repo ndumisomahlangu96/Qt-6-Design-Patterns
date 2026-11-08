@@ -80,12 +80,12 @@ void MainWindow::setupMenuBar()
     connect(sortAction, &QAction::triggered, this, &MainWindow::onSortLedger);
     editMenu->addAction(sortAction);
 
-    // --- Find Action ---
-    // Attempts to load the standard OS magnifier icon ("edit-find"), defaults to a list view icon if unavailable
-    QAction *findAction = new QAction(QIcon::fromTheme("edit-find", style->standardIcon(QStyle::SP_FileDialogContentsView)), "Find...", this);
-    findAction->setShortcut(QKeySequence::Find);
-    findAction->setStatusTip("Search the database for a specific variable");
-    connect(findAction, &QAction::triggered, this, &MainWindow::onFind);
+    // --- Find and Replace Action ---
+    // Attempts to load the standard OS replace icon, defaults to a list view icon if unavailable
+    QAction *findAction = new QAction(QIcon::fromTheme("edit-find-replace", style->standardIcon(QStyle::SP_FileDialogContentsView)), "Find and Replace...", this);
+    findAction->setShortcut(QKeySequence::Replace); // Standard shortcut for replace (usually Ctrl+H or Ctrl+R)
+    findAction->setStatusTip("Search and replace text across the entire database");
+    connect(findAction, &QAction::triggered, this, &MainWindow::onFindAndReplace);
     editMenu->addAction(findAction);
 
     // --- Help Menu ---
@@ -94,6 +94,32 @@ void MainWindow::setupMenuBar()
     QAction *aboutAction = new QAction(style->standardIcon(QStyle::SP_MessageBoxInformation), "About", this);
     connect(aboutAction, &QAction::triggered, this, &MainWindow::onAbout);
     helpMenu->addAction(aboutAction);
+
+    // --- Main Toolbar ---
+    QToolBar *mainToolBar = new QToolBar("Main Toolbar", this);
+    mainToolBar->setMovable(false); // Keeps the toolbar locked in place below the menubar
+    this->addToolBar(Qt::TopToolBarArea, mainToolBar);
+
+    // Add standard File actions to the toolbar for quick access
+    mainToolBar->addAction(newAction);
+    mainToolBar->addAction(openAction);
+    mainToolBar->addAction(saveAction);
+    mainToolBar->addSeparator();
+
+    // Create and add the Total Spending calculation action
+    QAction *totalSpendingAction = new QAction(style->standardIcon(QStyle::SP_DialogApplyButton), "Total Spending", this);
+    totalSpendingAction->setStatusTip("Calculate the total of all expenses in the ledger");
+    connect(totalSpendingAction, &QAction::triggered, this, &MainWindow::onCalculateTotalSpending);
+
+    // Set the button to display both the icon and the text "Total Spending" side-by-side
+    mainToolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    mainToolBar->addAction(totalSpendingAction);
+
+    // --- Ledger Statistics Action ---
+    QAction *statsAction = new QAction(style->standardIcon(QStyle::SP_FileDialogDetailedView), "Ledger Statistics", this);
+    statsAction->setStatusTip("Generate statistical summary of the current ledger data");
+    connect(statsAction, &QAction::triggered, this, &MainWindow::onGenerateStats);
+    mainToolBar->addAction(statsAction);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -187,7 +213,7 @@ void MainWindow::saveDataAs()
 
 void MainWindow::openFile()
 {
-    QString fileName = QFileDialog::getOpenFileName(this, "Open Expense File", QDir::homePath(), "CSV Files (*.csv);;All Files (*)");
+    QString fileName = QFileDialog::getOpenFileName(this, "Open Expense File", QDir::homePath(), "All Files (*);;CSV Files (*.csv)");
 
     if (fileName.isEmpty()) {
         return;
@@ -518,45 +544,81 @@ void MainWindow::onSortLedger()
     }
 }
 
-void MainWindow::onFind()
+void MainWindow::onFindAndReplace()
 {
-    bool ok;
-    QString searchText = QInputDialog::getText(this, "Find Variable",
-                                               "Enter text or number to find:", QLineEdit::Normal,
-                                               "", &ok);
+    // Create a custom dialog for multiple inputs
+    QDialog dialog(this);
+    dialog.setWindowTitle("Find and Replace");
+    dialog.setMinimumWidth(300);
 
-    if (ok && !searchText.isEmpty()) {
-        QModelIndex foundIndex;
+    QFormLayout form(&dialog);
 
-        // Iterate through rows and columns to find the variable
+    QLineEdit *findInput = new QLineEdit(&dialog);
+    findInput->setPlaceholderText("Enter target string...");
+
+    QLineEdit *replaceInput = new QLineEdit(&dialog);
+    replaceInput->setPlaceholderText("Enter replacement string...");
+
+    form.addRow("Find:", findInput);
+    form.addRow("Replace with:", replaceInput);
+
+    // Add standard OK (Replace) and Cancel buttons
+    QDialogButtonBox buttonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dialog);
+    buttonBox.button(QDialogButtonBox::Ok)->setText("Replace All");
+    form.addRow(&buttonBox);
+
+    connect(&buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(&buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    // If the user clicks 'Replace All'
+    if (dialog.exec() == QDialog::Accepted) {
+        QString targetText = findInput->text();
+        QString replaceText = replaceInput->text();
+
+        if (targetText.isEmpty()) {
+            return; // Nothing to search for
+        }
+
+        int replacedCount = 0;
+
+        // Iterate through all rows and columns to find and replace the variable
         for (int row = 0; row < expenseModel->rowCount(); ++row) {
             for (int col = 0; col < expenseModel->columnCount(); ++col) {
-                QModelIndex index = expenseModel->index(row, col);
+                QStandardItem *item = expenseModel->item(row, col);
+                QString currentText = item->text();
+
                 // Check if the cell contains the searched string (case-insensitive)
-                if (index.data().toString().contains(searchText, Qt::CaseInsensitive)) {
-                    foundIndex = index;
-                    break;
+                if (currentText.contains(targetText, Qt::CaseInsensitive)) {
+
+                    // Perform the replacement
+                    currentText.replace(targetText, replaceText, Qt::CaseInsensitive);
+
+                    // Update the visible text (This will also trigger the itemChanged signal to update the chart)
+                    item->setText(currentText);
+
+                    // Update the underlying UserRole data to ensure sorting doesn't break
+                    if (col == 4) {
+                        item->setData(currentText.toDouble(), Qt::UserRole);
+                    } else {
+                        item->setData(currentText, Qt::UserRole);
+                    }
+
+                    replacedCount++;
                 }
-            }
-            if (foundIndex.isValid()) {
-                break; // Stop searching once the first match is found
             }
         }
 
-        if (foundIndex.isValid()) {
-            // Automatically switch to the Ledger Reports tab (Index 1) so the user can see the highlighted variable
+        // Notify the user of the outcome
+        if (replacedCount > 0) {
+            ui->statusbar->showMessage(QString("Successfully replaced %1 occurrence(s).").arg(replacedCount), 5000);
+
+            // Switch to Ledger view so the user can see the changes
             QTabWidget *tabWidget = this->findChild<QTabWidget*>();
             if (tabWidget) {
                 tabWidget->setCurrentIndex(1);
             }
-
-            // Highlight the cell and scroll to it
-            ledgerView->selectionModel()->select(foundIndex, QItemSelectionModel::ClearAndSelect);
-            ledgerView->scrollTo(foundIndex);
-
-            ui->statusbar->showMessage("Found match for '" + searchText + "'.", 3000);
         } else {
-            QMessageBox::information(this, "Not Found", "Could not find '" + searchText + "' in the database.");
+            QMessageBox::information(this, "Not Found", "Could not find '" + targetText + "' in the database.");
         }
     }
 }
@@ -616,4 +678,99 @@ void MainWindow::onPieSliceClicked(QPieSlice *slice)
 
     // Clean up
     delete dialog;
+}
+
+void MainWindow::onCalculateTotalSpending()
+{
+    double total = 0.0;
+
+    // Iterate through all rows in the model and sum the "Amount" column (Index 4)
+    for (int row = 0; row < expenseModel->rowCount(); ++row) {
+        // We retrieve the double data directly from the UserRole to avoid string conversion errors
+        double amount = expenseModel->item(row, 4)->data(Qt::UserRole).toDouble();
+        total += amount;
+    }
+
+    // Format the result to 2 decimal places
+    QString formattedTotal = QString::number(total, 'f', 2);
+
+    // Update the status bar
+    ui->statusbar->showMessage("Total Spending: R " + formattedTotal, 5000);
+
+    // Display the result in an immediate pop-up
+    QMessageBox::information(this, "Total Spending",
+                             QString("The total spending for all records is:\n\nR %1").arg(formattedTotal));
+}
+
+void MainWindow::onGenerateStats()
+{
+    int rowCount = expenseModel->rowCount();
+    if (rowCount == 0) {
+        QMessageBox::information(this, "Ledger Statistics", "The ledger is currently empty. Add data to view statistics.");
+        return;
+    }
+
+    // Initialize tracking variables
+    double minExpense = expenseModel->item(0, 4)->data(Qt::UserRole).toDouble();
+    double maxExpense = minExpense;
+    double totalExpense = 0.0;
+
+    QMap<QString, int> categoryCounts;
+    QMap<QString, int> projectCounts;
+
+    // Scan the data model
+    for (int row = 0; row < rowCount; ++row) {
+        double amount = expenseModel->item(row, 4)->data(Qt::UserRole).toDouble();
+        QString project = expenseModel->item(row, 1)->text();
+        QString category = expenseModel->item(row, 2)->text();
+
+        // Update high/low/total
+        if (amount < minExpense) minExpense = amount;
+        if (amount > maxExpense) maxExpense = amount;
+        totalExpense += amount;
+
+        // Tally occurrences
+        categoryCounts[category]++;
+        projectCounts[project]++;
+    }
+
+    double avgExpense = totalExpense / rowCount;
+
+    // Determine the most frequent category
+    QString topCategory;
+    int maxCatCount = 0;
+    for (auto it = categoryCounts.begin(); it != categoryCounts.end(); ++it) {
+        if (it.value() > maxCatCount) {
+            maxCatCount = it.value();
+            topCategory = it.key();
+        }
+    }
+
+    // Determine the most frequent project
+    QString topProject;
+    int maxProjCount = 0;
+    for (auto it = projectCounts.begin(); it != projectCounts.end(); ++it) {
+        if (it.value() > maxProjCount) {
+            maxProjCount = it.value();
+            topProject = it.key();
+        }
+    }
+
+    // Format the findings using HTML for a clean visual presentation
+    QString statsMessage = QString(
+                               "<h3>Ledger Statistical Summary</h3>"
+                               "<b>Total Records Analyzed:</b> %1<br><br>"
+                               "<b>Average Expense:</b> R %2<br>"
+                               "<b>Highest Single Expense:</b> R %3<br>"
+                               "<b>Lowest Single Expense:</b> R %4<br><br>"
+                               "<b>Most Frequent Category:</b> %5 (%6 entries)<br>"
+                               "<b>Most Frequent Project:</b> %7 (%8 entries)"
+                               ).arg(rowCount)
+                               .arg(avgExpense, 0, 'f', 2)
+                               .arg(maxExpense, 0, 'f', 2)
+                               .arg(minExpense, 0, 'f', 2)
+                               .arg(topCategory).arg(maxCatCount)
+                               .arg(topProject).arg(maxProjCount);
+
+    QMessageBox::information(this, "Ledger Statistics", statsMessage);
 }

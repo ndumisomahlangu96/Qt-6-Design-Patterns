@@ -32,6 +32,8 @@
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QDialog>
+#include <QDialogButtonBox>
+#include <QToolBar> // New include for standard Qt Toolbar
 
 // QtCharts headers
 #include <QtCharts/QChartView>
@@ -67,8 +69,10 @@ private slots:
     void onDeleteSelected();
     void onAbout();
     void onSortLedger();
-    void onFind(); // New find slot added here
-    void onPieSliceClicked(QPieSlice *slice); // New slot for interactivity
+    void onFindAndReplace(); // find and replace slot added here
+    void onPieSliceClicked(QPieSlice *slice); // slot for interactivity
+    void onCalculateTotalSpending(); // slot for total calculation
+    void onGenerateStats(); // slot for generating statistical summary
 
 private:
     Ui::MainWindow *ui;
