@@ -1,11 +1,14 @@
 #include "mainwindow.h"
-#include "ui_mainwindow.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
-    , ui(new Ui::MainWindow)
 {
-    ui->setupUi(this);
+    // Create the central widget programmatically (No UI file needed)
+    QWidget *central = new QWidget(this);
+    setCentralWidget(central);
+
+    // Set the window title explicitly in C++
+    setWindowTitle("Finance Manager");
 
     setupModel();
     setupFlexibleUI();
@@ -14,7 +17,6 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    delete ui;
 }
 
 void MainWindow::setupMenuBar()
@@ -23,7 +25,7 @@ void MainWindow::setupMenuBar()
     QStyle *style = QApplication::style();
 
     // --- File Menu ---
-    QMenu *fileMenu = ui->menubar->addMenu("File");
+    QMenu *fileMenu = menuBar()->addMenu("File");
 
     QAction *newAction = new QAction(style->standardIcon(QStyle::SP_FileIcon), "New", this);
     newAction->setShortcut(QKeySequence::New);
@@ -66,9 +68,9 @@ void MainWindow::setupMenuBar()
     fileMenu->addAction(exitAction);
 
     // --- Edit Menu ---
-    QMenu *editMenu = ui->menubar->addMenu("Edit");
+    QMenu *editMenu = menuBar()->addMenu("Edit");
 
-    QAction *deleteAction = new QAction(style->standardIcon(QStyle::SP_TrashIcon), "Delete Selected Rocord", this);
+    QAction *deleteAction = new QAction(style->standardIcon(QStyle::SP_TrashIcon), "Delete Selected Record", this);
     deleteAction->setShortcut(QKeySequence::Delete);
     deleteAction->setStatusTip("Delete the currently selected record from the ledger");
     connect(deleteAction, &QAction::triggered, this, &MainWindow::onDeleteSelected);
@@ -81,15 +83,14 @@ void MainWindow::setupMenuBar()
     editMenu->addAction(sortAction);
 
     // --- Find and Replace Action ---
-    // Attempts to load the standard OS replace icon, defaults to a list view icon if unavailable
     QAction *findAction = new QAction(QIcon::fromTheme("edit-find-replace", style->standardIcon(QStyle::SP_FileDialogContentsView)), "Find and Replace...", this);
-    findAction->setShortcut(QKeySequence::Replace); // Standard shortcut for replace (usually Ctrl+H or Ctrl+R)
+    findAction->setShortcut(QKeySequence::Replace);
     findAction->setStatusTip("Search and replace text across the entire database");
     connect(findAction, &QAction::triggered, this, &MainWindow::onFindAndReplace);
     editMenu->addAction(findAction);
 
     // --- Help Menu ---
-    QMenu *helpMenu = ui->menubar->addMenu("Help");
+    QMenu *helpMenu = menuBar()->addMenu("Help");
 
     QAction *aboutAction = new QAction(style->standardIcon(QStyle::SP_MessageBoxInformation), "About", this);
     connect(aboutAction, &QAction::triggered, this, &MainWindow::onAbout);
@@ -97,21 +98,18 @@ void MainWindow::setupMenuBar()
 
     // --- Main Toolbar ---
     QToolBar *mainToolBar = new QToolBar("Main Toolbar", this);
-    mainToolBar->setMovable(false); // Keeps the toolbar locked in place below the menubar
+    mainToolBar->setMovable(false);
     this->addToolBar(Qt::TopToolBarArea, mainToolBar);
 
-    // Add standard File actions to the toolbar for quick access
     mainToolBar->addAction(newAction);
     mainToolBar->addAction(openAction);
     mainToolBar->addAction(saveAction);
     mainToolBar->addSeparator();
 
-    // Create and add the Total Spending calculation action
     QAction *totalSpendingAction = new QAction(style->standardIcon(QStyle::SP_DialogApplyButton), "Total Spending", this);
     totalSpendingAction->setStatusTip("Calculate the total of all expenses in the ledger");
     connect(totalSpendingAction, &QAction::triggered, this, &MainWindow::onCalculateTotalSpending);
 
-    // Set the button to display both the icon and the text "Total Spending" side-by-side
     mainToolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     mainToolBar->addAction(totalSpendingAction);
 
@@ -135,22 +133,18 @@ QString MainWindow::getDataFilePath()
     if (!dir.exists()) {
         dir.mkpath(".");
     }
-    return path + "/expenses.csv"; // Updated extension to .csv
+    return path + "/expenses.csv";
 }
 
 void MainWindow::saveData()
 {
-    // Use the currently opened file path, or default to the app data location if empty
     QString savePath = currentFilePath.isEmpty() ? getDataFilePath() : currentFilePath;
 
     QFile file(savePath);
     if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         QTextStream out(&file);
-
-        // Write CSV header
         out << "Date,Project/Site,Category,Description,Amount\n";
 
-        // Write CSV rows
         for (int row = 0; row < expenseModel->rowCount(); ++row) {
             QStringList rowData;
             for (int col = 0; col < expenseModel->columnCount(); ++col) {
@@ -162,15 +156,12 @@ void MainWindow::saveData()
         }
 
         file.close();
-
-        // Update the member variable in case it was the first default save
         currentFilePath = savePath;
-
-        ui->statusbar->showMessage("Data saved successfully to: " + currentFilePath, 3000);
+        statusBar()->showMessage("Data saved successfully to: " + currentFilePath, 3000);
     }
     else
     {
-        ui->statusbar->showMessage("Failed to save data.", 3000);
+        statusBar()->showMessage("Failed to save data.", 3000);
     }
 }
 
@@ -185,11 +176,8 @@ void MainWindow::saveDataAs()
     QFile file(fileName);
     if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         QTextStream out(&file);
-
-        // Write CSV header
         out << "Date,Project/Site,Category,Description,Amount\n";
 
-        // Write CSV rows
         for (int row = 0; row < expenseModel->rowCount(); ++row) {
             QStringList rowData;
             for (int col = 0; col < expenseModel->columnCount(); ++col) {
@@ -201,11 +189,8 @@ void MainWindow::saveDataAs()
         }
 
         file.close();
-
-        // Update the current file path to the new save location
         currentFilePath = fileName;
-
-        ui->statusbar->showMessage("File saved successfully to new location.", 3000);
+        statusBar()->showMessage("File saved successfully to new location.", 3000);
     } else {
         QMessageBox::warning(this, "Save As Error", "Could not write to the selected file.");
     }
@@ -225,10 +210,7 @@ void MainWindow::openFile()
         return;
     }
 
-    // Set the current file path to the newly opened file
     currentFilePath = fileName;
-
-    // Clear current data before loading the new file
     expenseModel->removeRows(0, expenseModel->rowCount());
 
     QTextStream in(&file);
@@ -236,8 +218,6 @@ void MainWindow::openFile()
 
     while (!in.atEnd()) {
         QString line = in.readLine();
-
-        // Skip the header row
         if (isFirstLine) {
             isFirstLine = false;
             continue;
@@ -247,7 +227,6 @@ void MainWindow::openFile()
         QString currentField;
         bool inQuotes = false;
 
-        // Basic CSV parser to respect quoted fields containing commas
         for (int i = 0; i < line.length(); ++i) {
             QChar c = line[i];
             if (c == '\"') {
@@ -266,20 +245,15 @@ void MainWindow::openFile()
         }
         fields.append(currentField);
 
-        // Ensure we have exactly 5 columns before adding to the model
         if (fields.size() >= 5) {
             QList<QStandardItem *> newRow;
             for (int col = 0; col < 5; ++col) {
                 QStandardItem *item = new QStandardItem(fields[col]);
-
                 if (col == 4) {
-                    // Store Amount column as a double for sorting calculations
                     item->setData(fields[col].toDouble(), Qt::UserRole);
                 } else {
-                    // Store Date, Project/Site, Category, and Description as strings
                     item->setData(fields[col], Qt::UserRole);
                 }
-
                 newRow << item;
             }
             expenseModel->appendRow(newRow);
@@ -287,26 +261,21 @@ void MainWindow::openFile()
     }
     file.close();
 
-    // Refresh the dashboard with the newly loaded data
     updateChart();
-    ui->statusbar->showMessage("File opened successfully.", 3000);
+    statusBar()->showMessage("File opened successfully.", 3000);
 }
 
 void MainWindow::setupModel()
 {
     expenseModel = new QStandardItemModel(0, 5, this);
     expenseModel->setHorizontalHeaderLabels({"Date", "Project/Site", "Category", "Description", "Amount"});
-
-    // Enable sorting by actual data types (double for amount, string for others)
     expenseModel->setSortRole(Qt::UserRole);
-
-    // Automatically update the visual dashboard when manual edits are made in the ledger view
     connect(expenseModel, &QStandardItemModel::itemChanged, this, &MainWindow::updateChart);
 }
 
 void MainWindow::setupFlexibleUI()
 {
-    QVBoxLayout *mainLayout = new QVBoxLayout(ui->centralwidget);
+    QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget());
     QTabWidget *tabWidget = new QTabWidget(this);
 
     // --- TAB 1: Expense Entry ---
@@ -338,7 +307,6 @@ void MainWindow::setupFlexibleUI()
     formLayout->addRow("Description:", descriptionEdit);
     formLayout->addRow("Amount:", amountSpin);
 
-    // Add a standard save/apply icon to the button
     QPushButton *saveBtn = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_DialogOkButton), "Record Expense");
     connect(saveBtn, &QPushButton::clicked, this, &MainWindow::onAddExpenseClicked);
 
@@ -361,12 +329,9 @@ void MainWindow::setupFlexibleUI()
     QVBoxLayout *dashboardLayout = new QVBoxLayout(dashboardTab);
 
     categorySeries = new QPieSeries();
-
-    // Connect the slice click signal to our new drill-down slot
     connect(categorySeries, &QPieSeries::clicked, this, &MainWindow::onPieSliceClicked);
 
     expenseChart = new QChart();
-    expenseChart->addSeries(categorySeries);
     expenseChart->addSeries(categorySeries);
     expenseChart->setTitle("Expenses by Category");
     expenseChart->setAnimationOptions(QChart::SeriesAnimations);
@@ -405,7 +370,7 @@ void MainWindow::onAddExpenseClicked()
     newRow << descItem;
 
     QStandardItem *amountItem = new QStandardItem(QString::number(amountSpin->value(), 'f', 2));
-    amountItem->setData(amountSpin->value(), Qt::UserRole); // Store explicitly as double for numeric sorting
+    amountItem->setData(amountSpin->value(), Qt::UserRole);
     newRow << amountItem;
 
     expenseModel->appendRow(newRow);
@@ -413,7 +378,6 @@ void MainWindow::onAddExpenseClicked()
     descriptionEdit->clear();
     amountSpin->setValue(0.0);
 
-    // Refresh the chart with the new data
     updateChart();
 }
 
@@ -422,14 +386,12 @@ void MainWindow::updateChart()
     categorySeries->clear();
     QMap<QString, double> categoryTotals;
 
-    // Aggregate totals by category
     for (int row = 0; row < expenseModel->rowCount(); ++row) {
         QString category = expenseModel->item(row, 2)->text();
         double amount = expenseModel->item(row, 4)->text().toDouble();
         categoryTotals[category] += amount;
     }
 
-    // Populate the pie series
     for (auto it = categoryTotals.begin(); it != categoryTotals.end(); ++it) {
         QPieSlice *slice = categorySeries->append(it.key(), it.value());
         slice->setLabelVisible(true);
@@ -439,14 +401,13 @@ void MainWindow::updateChart()
 
 void MainWindow::onNewData()
 {
-    // Ask for confirmation before clearing data
     QMessageBox::StandardButton reply;
     reply = QMessageBox::question(this, "Clear Data", "Are you sure you want to clear all expense records?", QMessageBox::Yes | QMessageBox::No);
 
     if (reply == QMessageBox::Yes) {
         expenseModel->removeRows(0, expenseModel->rowCount());
         updateChart();
-        ui->statusbar->showMessage("All records cleared.", 3000);
+        statusBar()->showMessage("All records cleared.", 3000);
     }
 }
 
@@ -461,22 +422,18 @@ void MainWindow::onExportCSV()
     QFile file(fileName);
     if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         QTextStream out(&file);
-
-        // Write CSV headers
         out << "Date,Project/Site,Category,Description,Amount\n";
 
-        // Write CSV rows
         for (int row = 0; row < expenseModel->rowCount(); ++row) {
             QStringList rowData;
             for (int col = 0; col < expenseModel->columnCount(); ++col) {
-                // Wrap in quotes to safely handle commas inside descriptions
                 rowData << "\"" + expenseModel->item(row, col)->text() + "\"";
             }
             out << rowData.join(",") << "\n";
         }
 
         file.close();
-        ui->statusbar->showMessage("Data exported to CSV successfully.", 3000);
+        statusBar()->showMessage("Data exported to CSV successfully.", 3000);
     } else {
         QMessageBox::warning(this, "Export Error", "Could not write to the selected file.");
     }
@@ -484,13 +441,11 @@ void MainWindow::onExportCSV()
 
 void MainWindow::onExit()
 {
-    // This will trigger the closeEvent() which automatically calls saveData()
     this->close();
 }
 
 void MainWindow::onDeleteSelected()
 {
-    // Fetch currently selected items from the ledger view
     QModelIndexList selectedRows = ledgerView->selectionModel()->selectedRows();
 
     if (selectedRows.isEmpty()) {
@@ -498,13 +453,12 @@ void MainWindow::onDeleteSelected()
         return;
     }
 
-    // Remove row from model (start from the back to avoid shifting index issues if multiple are supported later)
     for (int i = selectedRows.count() - 1; i >= 0; i--) {
         expenseModel->removeRow(selectedRows.at(i).row());
     }
 
     updateChart();
-    ui->statusbar->showMessage("Record deleted.", 3000);
+    statusBar()->showMessage("Record deleted.", 3000);
 }
 
 void MainWindow::onAbout()
@@ -517,36 +471,30 @@ void MainWindow::onAbout()
 
 void MainWindow::onSortLedger()
 {
-    // Define the available variables (columns) for sorting
     QStringList columns = {"Date", "Project/Site", "Category", "Description", "Amount"};
     bool ok;
 
-    // Prompt the user to select a variable using QInputDialog
     QString item = QInputDialog::getItem(this, "Sort Ledger",
                                          "Select variable to sort by:", columns, 0, false, &ok);
 
     if (ok && !item.isEmpty()) {
         int columnIndex = columns.indexOf(item);
         if (columnIndex != -1) {
-            // Prompt the user to select the sorting order using QMessageBox
             QMessageBox::StandardButton reply;
             reply = QMessageBox::question(this, "Sort Order",
                                           QString("Sort the '%1' column in Ascending order?\n(Select 'No' for Descending)").arg(item),
                                           QMessageBox::Yes | QMessageBox::No);
 
             Qt::SortOrder order = (reply == QMessageBox::Yes) ? Qt::AscendingOrder : Qt::DescendingOrder;
-
-            // Sort the underlying data model
             expenseModel->sort(columnIndex, order);
 
-            ui->statusbar->showMessage(QString("Ledger sorted by %1.").arg(item), 3000);
+            statusBar()->showMessage(QString("Ledger sorted by %1.").arg(item), 3000);
         }
     }
 }
 
 void MainWindow::onFindAndReplace()
 {
-    // Create a custom dialog for multiple inputs
     QDialog dialog(this);
     dialog.setWindowTitle("Find and Replace");
     dialog.setMinimumWidth(300);
@@ -562,7 +510,6 @@ void MainWindow::onFindAndReplace()
     form.addRow("Find:", findInput);
     form.addRow("Replace with:", replaceInput);
 
-    // Add standard OK (Replace) and Cancel buttons
     QDialogButtonBox buttonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dialog);
     buttonBox.button(QDialogButtonBox::Ok)->setText("Replace All");
     form.addRow(&buttonBox);
@@ -570,33 +517,25 @@ void MainWindow::onFindAndReplace()
     connect(&buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(&buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
-    // If the user clicks 'Replace All'
     if (dialog.exec() == QDialog::Accepted) {
         QString targetText = findInput->text();
         QString replaceText = replaceInput->text();
 
         if (targetText.isEmpty()) {
-            return; // Nothing to search for
+            return;
         }
 
         int replacedCount = 0;
 
-        // Iterate through all rows and columns to find and replace the variable
         for (int row = 0; row < expenseModel->rowCount(); ++row) {
             for (int col = 0; col < expenseModel->columnCount(); ++col) {
                 QStandardItem *item = expenseModel->item(row, col);
                 QString currentText = item->text();
 
-                // Check if the cell contains the searched string (case-insensitive)
                 if (currentText.contains(targetText, Qt::CaseInsensitive)) {
-
-                    // Perform the replacement
                     currentText.replace(targetText, replaceText, Qt::CaseInsensitive);
-
-                    // Update the visible text (This will also trigger the itemChanged signal to update the chart)
                     item->setText(currentText);
 
-                    // Update the underlying UserRole data to ensure sorting doesn't break
                     if (col == 4) {
                         item->setData(currentText.toDouble(), Qt::UserRole);
                     } else {
@@ -608,11 +547,9 @@ void MainWindow::onFindAndReplace()
             }
         }
 
-        // Notify the user of the outcome
         if (replacedCount > 0) {
-            ui->statusbar->showMessage(QString("Successfully replaced %1 occurrence(s).").arg(replacedCount), 5000);
+            statusBar()->showMessage(QString("Successfully replaced %1 occurrence(s).").arg(replacedCount), 5000);
 
-            // Switch to Ledger view so the user can see the changes
             QTabWidget *tabWidget = this->findChild<QTabWidget*>();
             if (tabWidget) {
                 tabWidget->setCurrentIndex(1);
@@ -625,13 +562,9 @@ void MainWindow::onFindAndReplace()
 
 void MainWindow::onPieSliceClicked(QPieSlice *slice)
 {
-    // The slice label is formatted as "Category: R Amount".
-    // We extract the exact category name by splitting at the colon.
     QString category = slice->label().section(':', 0, 0).trimmed();
-
     QMap<QString, double> projectTotals;
 
-    // Scan the model and aggregate spending by Project for the clicked Category
     for (int row = 0; row < expenseModel->rowCount(); ++row) {
         QString rowCategory = expenseModel->item(row, 2)->text();
         if (rowCategory == category) {
@@ -641,14 +574,12 @@ void MainWindow::onPieSliceClicked(QPieSlice *slice)
         }
     }
 
-    // Create a new modal dialog to display the secondary breakdown chart
     QDialog *dialog = new QDialog(this);
     dialog->setWindowTitle(category + " - Project Breakdown");
     dialog->resize(500, 400);
 
     QPieSeries *projectSeries = new QPieSeries();
 
-    // Populate the sub-chart series
     for (auto it = projectTotals.begin(); it != projectTotals.end(); ++it) {
         QPieSlice *pSlice = projectSeries->append(it.key(), it.value());
         pSlice->setLabelVisible(true);
@@ -664,19 +595,14 @@ void MainWindow::onPieSliceClicked(QPieSlice *slice)
     QChartView *pChartView = new QChartView(projectChart);
     pChartView->setRenderHint(QPainter::Antialiasing);
 
-    // Layout the dialog
     QVBoxLayout *layout = new QVBoxLayout(dialog);
     layout->addWidget(pChartView);
 
-    // Add a close button
     QPushButton *closeBtn = new QPushButton("Close");
     connect(closeBtn, &QPushButton::clicked, dialog, &QDialog::accept);
     layout->addWidget(closeBtn, 0, Qt::AlignRight);
 
-    // Execute the dialog modally
     dialog->exec();
-
-    // Clean up
     delete dialog;
 }
 
@@ -684,20 +610,14 @@ void MainWindow::onCalculateTotalSpending()
 {
     double total = 0.0;
 
-    // Iterate through all rows in the model and sum the "Amount" column (Index 4)
     for (int row = 0; row < expenseModel->rowCount(); ++row) {
-        // We retrieve the double data directly from the UserRole to avoid string conversion errors
         double amount = expenseModel->item(row, 4)->data(Qt::UserRole).toDouble();
         total += amount;
     }
 
-    // Format the result to 2 decimal places
     QString formattedTotal = QString::number(total, 'f', 2);
+    statusBar()->showMessage("Total Spending: R " + formattedTotal, 5000);
 
-    // Update the status bar
-    ui->statusbar->showMessage("Total Spending: R " + formattedTotal, 5000);
-
-    // Display the result in an immediate pop-up
     QMessageBox::information(this, "Total Spending",
                              QString("The total spending for all records is:\n\nR %1").arg(formattedTotal));
 }
@@ -710,7 +630,6 @@ void MainWindow::onGenerateStats()
         return;
     }
 
-    // Initialize tracking variables
     double minExpense = expenseModel->item(0, 4)->data(Qt::UserRole).toDouble();
     double maxExpense = minExpense;
     double totalExpense = 0.0;
@@ -718,25 +637,21 @@ void MainWindow::onGenerateStats()
     QMap<QString, int> categoryCounts;
     QMap<QString, int> projectCounts;
 
-    // Scan the data model
     for (int row = 0; row < rowCount; ++row) {
         double amount = expenseModel->item(row, 4)->data(Qt::UserRole).toDouble();
         QString project = expenseModel->item(row, 1)->text();
         QString category = expenseModel->item(row, 2)->text();
 
-        // Update high/low/total
         if (amount < minExpense) minExpense = amount;
         if (amount > maxExpense) maxExpense = amount;
         totalExpense += amount;
 
-        // Tally occurrences
         categoryCounts[category]++;
         projectCounts[project]++;
     }
 
     double avgExpense = totalExpense / rowCount;
 
-    // Determine the most frequent category
     QString topCategory;
     int maxCatCount = 0;
     for (auto it = categoryCounts.begin(); it != categoryCounts.end(); ++it) {
@@ -746,7 +661,6 @@ void MainWindow::onGenerateStats()
         }
     }
 
-    // Determine the most frequent project
     QString topProject;
     int maxProjCount = 0;
     for (auto it = projectCounts.begin(); it != projectCounts.end(); ++it) {
@@ -756,7 +670,6 @@ void MainWindow::onGenerateStats()
         }
     }
 
-    // Format the findings using HTML for a clean visual presentation
     QString statsMessage = QString(
                                "<h3>Ledger Statistical Summary</h3>"
                                "<b>Total Records Analyzed:</b> %1<br><br>"

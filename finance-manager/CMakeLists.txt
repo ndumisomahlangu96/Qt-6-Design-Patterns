@@ -10,7 +10,6 @@ qt_add_executable(finance-manager
     main.cpp
     mainwindow.cpp
     mainwindow.h
-    mainwindow.ui
 )
 
 target_link_libraries(finance-manager

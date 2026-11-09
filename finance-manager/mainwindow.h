@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QApplication>
 #include <QStandardItemModel>
 #include <QComboBox>
 #include <QDateEdit>
@@ -33,18 +34,14 @@
 #include <QInputDialog>
 #include <QDialog>
 #include <QDialogButtonBox>
-#include <QToolBar> // New include for standard Qt Toolbar
+#include <QToolBar>
+#include <QMenuBar>
+#include <QStatusBar>
 
 // QtCharts headers
 #include <QtCharts/QChartView>
 #include <QtCharts/QPieSeries>
 #include <QtCharts/QChart>
-
-QT_BEGIN_NAMESPACE
-namespace Ui {
-class MainWindow;
-}
-QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
 {
@@ -69,14 +66,12 @@ private slots:
     void onDeleteSelected();
     void onAbout();
     void onSortLedger();
-    void onFindAndReplace(); // find and replace slot added here
-    void onPieSliceClicked(QPieSlice *slice); // slot for interactivity
-    void onCalculateTotalSpending(); // slot for total calculation
-    void onGenerateStats(); // slot for generating statistical summary
+    void onFindAndReplace();
+    void onPieSliceClicked(QPieSlice *slice);
+    void onCalculateTotalSpending();
+    void onGenerateStats();
 
 private:
-    Ui::MainWindow *ui;
-
     // Data Model
     QStandardItemModel *expenseModel;
     QString currentFilePath; // Add this variable to track the active file
