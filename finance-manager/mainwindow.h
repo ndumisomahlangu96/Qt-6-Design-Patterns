@@ -27,6 +27,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QKeySequence>
+#include <QLabel>
 
 // New Includes for standard application features
 #include <QFileDialog>
@@ -66,7 +67,18 @@ private slots:
     void onDeleteSelected();
     void onAbout();
     void onSortLedger();
-    void onFindAndReplace();
+
+    // Updated slot for toggling the find widget
+    void onToggleFindReplace();
+
+    // Slots for the Find/Replace widget buttons
+    void onFindNext();
+    void onFindPrevious();
+    void onSelectAllMatches();
+    void onReplace();
+    void onReplaceAndFind();
+    void onReplaceAll();
+
     void onPieSliceClicked(QPieSlice *slice);
     void onCalculateTotalSpending();
     void onGenerateStats();
@@ -83,6 +95,18 @@ private:
     QDoubleSpinBox *amountSpin;
     QLineEdit *descriptionEdit;
     QTableView *ledgerView;
+    QTabWidget *mainTabWidget; // Track the tab widget to switch tabs
+
+    // --- Find/Replace Widget Components ---
+    QWidget *findReplaceWidget;
+    QLineEdit *findInput;
+    QLineEdit *replaceInput;
+
+    // Search state tracking
+    QModelIndexList currentMatches;
+    int currentMatchIndex = -1;
+    void performSearch();
+    void highlightCurrentMatch();
 
     // Chart Components
     QChart *expenseChart;

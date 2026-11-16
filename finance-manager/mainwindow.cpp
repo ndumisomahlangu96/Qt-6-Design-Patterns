@@ -82,11 +82,10 @@ void MainWindow::setupMenuBar()
     connect(sortAction, &QAction::triggered, this, &MainWindow::onSortLedger);
     editMenu->addAction(sortAction);
 
-    // --- Find and Replace Action ---
+    // ---  Find and Replace Action ---
     QAction *findAction = new QAction(QIcon::fromTheme("edit-find-replace", style->standardIcon(QStyle::SP_FileDialogContentsView)), "Find and Replace...", this);
-    findAction->setShortcut(QKeySequence::Replace);
-    findAction->setStatusTip("Search and replace text across the entire database");
-    connect(findAction, &QAction::triggered, this, &MainWindow::onFindAndReplace);
+    findAction->setShortcut(QKeySequence::Find); // Using standard Ctrl+F shortcut
+    connect(findAction, &QAction::triggered, this, &MainWindow::onToggleFindReplace);
     editMenu->addAction(findAction);
 
     // --- Help Menu ---
@@ -128,12 +127,11 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 QString MainWindow::getDataFilePath()
 {
-    QString path = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir dir(path);
-    if (!dir.exists()) {
-        dir.mkpath(".");
-    }
-    return path + "/expenses.csv";
+    // Retrieve the application's current working directory
+    QString path = QDir::currentPath();
+
+    // Return the path with a .txt extension
+    return path + "/expenses.txt";
 }
 
 void MainWindow::saveData()
@@ -276,7 +274,8 @@ void MainWindow::setupModel()
 void MainWindow::setupFlexibleUI()
 {
     QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget());
-    QTabWidget *tabWidget = new QTabWidget(this);
+    // FIX: Initialize the class member instead of a local 'QTabWidget *tabWidget'
+    mainTabWidget = new QTabWidget(this);
 
     // --- TAB 1: Expense Entry ---
     QWidget *entryTab = new QWidget();
@@ -324,6 +323,56 @@ void MainWindow::setupFlexibleUI()
     ledgerView->setAlternatingRowColors(true);
     ledgerLayout->addWidget(ledgerView);
 
+    // --- BUILD THE FIND/REPLACE WIDGET ---
+    findReplaceWidget = new QWidget();
+    QGridLayout *searchLayout = new QGridLayout(findReplaceWidget);
+    searchLayout->setContentsMargins(0, 5, 0, 0); // Little margin at top to separate from table
+
+    // Row 0: Find
+    QLabel *findLabel = new QLabel("Find:");
+    findInput = new QLineEdit();
+    findInput->setPlaceholderText("Find");
+    findInput->setClearButtonEnabled(true);
+
+    // Detect when text changes to re-run the search
+    connect(findInput, &QLineEdit::textChanged, this, &MainWindow::performSearch);
+
+    QPushButton *btnFindPrev = new QPushButton("Find Previous");
+    QPushButton *btnFindNext = new QPushButton("Find Next");
+    QPushButton *btnSelectAll = new QPushButton("Select All");
+
+    connect(btnFindPrev, &QPushButton::clicked, this, &MainWindow::onFindPrevious);
+    connect(btnFindNext, &QPushButton::clicked, this, &MainWindow::onFindNext);
+    connect(btnSelectAll, &QPushButton::clicked, this, &MainWindow::onSelectAllMatches);
+
+    searchLayout->addWidget(findLabel, 0, 0);
+    searchLayout->addWidget(findInput, 0, 1);
+    searchLayout->addWidget(btnFindPrev, 0, 2);
+    searchLayout->addWidget(btnFindNext, 0, 3);
+    searchLayout->addWidget(btnSelectAll, 0, 4);
+
+    // Row 1: Replace
+    QLabel *replaceLabel = new QLabel("Replace with:");
+    replaceInput = new QLineEdit();
+
+    QPushButton *btnReplace = new QPushButton("Replace");
+    QPushButton *btnReplaceFind = new QPushButton("Replace && Find");
+    QPushButton *btnReplaceAll = new QPushButton("Replace All");
+
+    connect(btnReplace, &QPushButton::clicked, this, &MainWindow::onReplace);
+    connect(btnReplaceFind, &QPushButton::clicked, this, &MainWindow::onReplaceAndFind);
+    connect(btnReplaceAll, &QPushButton::clicked, this, &MainWindow::onReplaceAll);
+
+    searchLayout->addWidget(replaceLabel, 1, 0);
+    searchLayout->addWidget(replaceInput, 1, 1);
+    searchLayout->addWidget(btnReplace, 1, 2);
+    searchLayout->addWidget(btnReplaceFind, 1, 3);
+    searchLayout->addWidget(btnReplaceAll, 1, 4);
+
+    // Add search widget to the bottom of the ledger layout, initially hidden
+    ledgerLayout->addWidget(findReplaceWidget);
+    findReplaceWidget->setVisible(false);
+
     // --- TAB 3: Visual Dashboard ---
     QWidget *dashboardTab = new QWidget();
     QVBoxLayout *dashboardLayout = new QVBoxLayout(dashboardTab);
@@ -341,12 +390,12 @@ void MainWindow::setupFlexibleUI()
     chartView->setRenderHint(QPainter::Antialiasing);
     dashboardLayout->addWidget(chartView);
 
-    // Add tabs
-    tabWidget->addTab(entryTab, "Data Entry");
-    tabWidget->addTab(ledgerTab, "Ledger Reports");
-    tabWidget->addTab(dashboardTab, "Visual Dashboard");
+    // FIX: Update the tab additions at the very end of the function to use mainTabWidget
+    mainTabWidget->addTab(entryTab, "Data Entry");
+    mainTabWidget->addTab(ledgerTab, "Ledger Reports");
+    mainTabWidget->addTab(dashboardTab, "Visual Dashboard");
 
-    mainLayout->addWidget(tabWidget);
+    mainLayout->addWidget(mainTabWidget);
 }
 
 void MainWindow::onAddExpenseClicked()
@@ -493,70 +542,162 @@ void MainWindow::onSortLedger()
     }
 }
 
-void MainWindow::onFindAndReplace()
+// --- NEW SEARCH LOGIC AND SLOT IMPLEMENTATIONS ---
+
+void MainWindow::onToggleFindReplace()
 {
-    QDialog dialog(this);
-    dialog.setWindowTitle("Find and Replace");
-    dialog.setMinimumWidth(300);
+    // Force switch to the Ledger tab (index 1) to see the search bar
+    mainTabWidget->setCurrentIndex(1);
 
-    QFormLayout form(&dialog);
+    bool isVisible = findReplaceWidget->isVisible();
+    findReplaceWidget->setVisible(!isVisible);
 
-    QLineEdit *findInput = new QLineEdit(&dialog);
-    findInput->setPlaceholderText("Enter target string...");
+    if (!isVisible) {
+        findInput->setFocus();
+        findInput->selectAll();
+    } else {
+        // Clear selection when closing
+        ledgerView->clearSelection();
+    }
+}
 
-    QLineEdit *replaceInput = new QLineEdit(&dialog);
-    replaceInput->setPlaceholderText("Enter replacement string...");
+void MainWindow::performSearch()
+{
+    currentMatches.clear();
+    currentMatchIndex = -1;
+    ledgerView->clearSelection();
 
-    form.addRow("Find:", findInput);
-    form.addRow("Replace with:", replaceInput);
+    QString targetText = findInput->text();
+    if (targetText.isEmpty()) {
+        return;
+    }
 
-    QDialogButtonBox buttonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dialog);
-    buttonBox.button(QDialogButtonBox::Ok)->setText("Replace All");
-    form.addRow(&buttonBox);
+    // Scan the entire model for matches
+    for (int row = 0; row < expenseModel->rowCount(); ++row) {
+        for (int col = 0; col < expenseModel->columnCount(); ++col) {
+            QModelIndex index = expenseModel->index(row, col);
+            QString cellData = expenseModel->data(index).toString();
 
-    connect(&buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(&buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-
-    if (dialog.exec() == QDialog::Accepted) {
-        QString targetText = findInput->text();
-        QString replaceText = replaceInput->text();
-
-        if (targetText.isEmpty()) {
-            return;
+            if (cellData.contains(targetText, Qt::CaseInsensitive)) {
+                currentMatches.append(index);
+            }
         }
+    }
 
-        int replacedCount = 0;
+    if (!currentMatches.isEmpty()) {
+        currentMatchIndex = 0;
+        highlightCurrentMatch();
+    }
+}
 
-        for (int row = 0; row < expenseModel->rowCount(); ++row) {
-            for (int col = 0; col < expenseModel->columnCount(); ++col) {
-                QStandardItem *item = expenseModel->item(row, col);
-                QString currentText = item->text();
+void MainWindow::highlightCurrentMatch()
+{
+    if (currentMatches.isEmpty() || currentMatchIndex < 0 || currentMatchIndex >= currentMatches.size()) {
+        return;
+    }
 
-                if (currentText.contains(targetText, Qt::CaseInsensitive)) {
-                    currentText.replace(targetText, replaceText, Qt::CaseInsensitive);
-                    item->setText(currentText);
+    QModelIndex index = currentMatches.at(currentMatchIndex);
+    ledgerView->setCurrentIndex(index);
+    ledgerView->scrollTo(index);
+}
 
-                    if (col == 4) {
-                        item->setData(currentText.toDouble(), Qt::UserRole);
-                    } else {
-                        item->setData(currentText, Qt::UserRole);
-                    }
+void MainWindow::onFindNext()
+{
+    if (currentMatches.isEmpty()) return;
 
-                    replacedCount++;
+    currentMatchIndex++;
+    if (currentMatchIndex >= currentMatches.size()) {
+        currentMatchIndex = 0; // Wrap around to top
+    }
+    highlightCurrentMatch();
+}
+
+void MainWindow::onFindPrevious()
+{
+    if (currentMatches.isEmpty()) return;
+
+    currentMatchIndex--;
+    if (currentMatchIndex < 0) {
+        currentMatchIndex = currentMatches.size() - 1; // Wrap around to bottom
+    }
+    highlightCurrentMatch();
+}
+
+void MainWindow::onSelectAllMatches()
+{
+    ledgerView->clearSelection();
+    for (const QModelIndex &index : currentMatches) {
+        ledgerView->selectionModel()->select(index, QItemSelectionModel::Select);
+    }
+}
+
+void MainWindow::onReplace()
+{
+    if (currentMatches.isEmpty() || currentMatchIndex < 0 || currentMatchIndex >= currentMatches.size()) {
+        return;
+    }
+
+    QModelIndex index = currentMatches.at(currentMatchIndex);
+    QString currentText = expenseModel->data(index).toString();
+    QString targetText = findInput->text();
+    QString replaceText = replaceInput->text();
+
+    currentText.replace(targetText, replaceText, Qt::CaseInsensitive);
+
+    // Update the item
+    QStandardItem *item = expenseModel->itemFromIndex(index);
+    item->setText(currentText);
+
+    if (index.column() == 4) {
+        item->setData(currentText.toDouble(), Qt::UserRole);
+    } else {
+        item->setData(currentText, Qt::UserRole);
+    }
+
+    // We modified the data, we must search again to update the match list
+    performSearch();
+}
+
+void MainWindow::onReplaceAndFind()
+{
+    onReplace();
+    onFindNext();
+}
+
+void MainWindow::onReplaceAll()
+{
+    QString targetText = findInput->text();
+    QString replaceText = replaceInput->text();
+
+    if (targetText.isEmpty()) return;
+
+    int replacedCount = 0;
+
+    for (int row = 0; row < expenseModel->rowCount(); ++row) {
+        for (int col = 0; col < expenseModel->columnCount(); ++col) {
+            QStandardItem *item = expenseModel->item(row, col);
+            QString currentText = item->text();
+
+            if (currentText.contains(targetText, Qt::CaseInsensitive)) {
+                currentText.replace(targetText, replaceText, Qt::CaseInsensitive);
+                item->setText(currentText);
+
+                if (col == 4) {
+                    item->setData(currentText.toDouble(), Qt::UserRole);
+                } else {
+                    item->setData(currentText, Qt::UserRole);
                 }
+
+                replacedCount++;
             }
         }
+    }
 
-        if (replacedCount > 0) {
-            statusBar()->showMessage(QString("Successfully replaced %1 occurrence(s).").arg(replacedCount), 5000);
-
-            QTabWidget *tabWidget = this->findChild<QTabWidget*>();
-            if (tabWidget) {
-                tabWidget->setCurrentIndex(1);
-            }
-        } else {
-            QMessageBox::information(this, "Not Found", "Could not find '" + targetText + "' in the database.");
-        }
+    if (replacedCount > 0) {
+        statusBar()->showMessage(QString("Successfully replaced %1 occurrence(s).").arg(replacedCount), 5000);
+        performSearch(); // Refresh highlight list
+    } else {
+        QMessageBox::information(this, "Not Found", "Could not find '" + targetText + "' in the database.");
     }
 }
 
