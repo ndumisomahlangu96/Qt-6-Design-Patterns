@@ -377,20 +377,56 @@ void MainWindow::setupFlexibleUI()
     QWidget *dashboardTab = new QWidget();
     QVBoxLayout *dashboardLayout = new QVBoxLayout(dashboardTab);
 
+    // Dropdown to switch charts
+    chartTypeCombo = new QComboBox();
+    chartTypeCombo->addItems({"Expenses by Category (Pie Chart)", "Cash Flow over Time (Line Chart)"});
+    connect(chartTypeCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onChartTypeChanged);
+    dashboardLayout->addWidget(chartTypeCombo);
+
+    chartStack = new QStackedWidget();
+
+    // 1. Setup Pie Chart
     categorySeries = new QPieSeries();
     connect(categorySeries, &QPieSeries::clicked, this, &MainWindow::onPieSliceClicked);
 
-    expenseChart = new QChart();
-    expenseChart->addSeries(categorySeries);
-    expenseChart->setTitle("Expenses by Category");
-    expenseChart->setAnimationOptions(QChart::SeriesAnimations);
-    expenseChart->legend()->setAlignment(Qt::AlignRight);
+    pieChart = new QChart();
+    pieChart->addSeries(categorySeries);
+    pieChart->setTitle("Expenses by Category");
+    pieChart->setAnimationOptions(QChart::SeriesAnimations);
+    pieChart->legend()->setAlignment(Qt::AlignRight);
 
-    chartView = new QChartView(expenseChart);
-    chartView->setRenderHint(QPainter::Antialiasing);
-    dashboardLayout->addWidget(chartView);
+    pieChartView = new QChartView(pieChart);
+    pieChartView->setRenderHint(QPainter::Antialiasing);
+    chartStack->addWidget(pieChartView);
 
-    // FIX: Update the tab additions at the very end of the function to use mainTabWidget
+    // 2. Setup Time-Series Line Chart
+    timeSeries = new QLineSeries();
+    timeSeries->setName("Total Expenses");
+
+    lineChart = new QChart();
+    lineChart->addSeries(timeSeries);
+    lineChart->setTitle("Cash Flow Over Time");
+    lineChart->setAnimationOptions(QChart::SeriesAnimations);
+
+    axisX = new QDateTimeAxis();
+    axisX->setTickCount(5);
+    axisX->setFormat("yyyy-MM-dd");
+    axisX->setTitleText("Date");
+    lineChart->addAxis(axisX, Qt::AlignBottom);
+    timeSeries->attachAxis(axisX);
+
+    axisY = new QValueAxis();
+    axisY->setLabelFormat("R %.2f");
+    axisY->setTitleText("Amount Spent");
+    lineChart->addAxis(axisY, Qt::AlignLeft);
+    timeSeries->attachAxis(axisY);
+
+    lineChartView = new QChartView(lineChart);
+    lineChartView->setRenderHint(QPainter::Antialiasing);
+    chartStack->addWidget(lineChartView);
+
+    dashboardLayout->addWidget(chartStack);
+
     mainTabWidget->addTab(entryTab, "Data Entry");
     mainTabWidget->addTab(ledgerTab, "Ledger Reports");
     mainTabWidget->addTab(dashboardTab, "Visual Dashboard");
@@ -432,22 +468,62 @@ void MainWindow::onAddExpenseClicked()
 
 void MainWindow::updateChart()
 {
+    // 1. Clear both existing chart series
     categorySeries->clear();
-    QMap<QString, double> categoryTotals;
+    timeSeries->clear();
 
+    QMap<QString, double> categoryTotals;
+    QMap<QDateTime, double> dateTotals;
+
+    // 2. Extract data from the model
     for (int row = 0; row < expenseModel->rowCount(); ++row) {
+        // --- Pie Chart Data (Category) ---
         QString category = expenseModel->item(row, 2)->text();
         double amount = expenseModel->item(row, 4)->text().toDouble();
         categoryTotals[category] += amount;
+
+        // --- Line Chart Data (Date) ---
+        QString dateStr = expenseModel->item(row, 0)->text();
+        QDateTime date = QDateTime::fromString(dateStr, "yyyy-MM-dd");
+        if (date.isValid()) {
+            // QMap automatically sorts by QDateTime (chronologically)
+            dateTotals[date] += amount;
+        }
     }
 
+    // 3. Populate Pie Chart
     for (auto it = categoryTotals.begin(); it != categoryTotals.end(); ++it) {
         QPieSlice *slice = categorySeries->append(it.key(), it.value());
         slice->setLabelVisible(true);
         slice->setLabel(QString("%1: R %2").arg(it.key()).arg(it.value(), 0, 'f', 2));
     }
-}
 
+    // 4. Populate Line Chart and Scale Axes
+    if (!dateTotals.isEmpty()) {
+        double maxAmount = 0.0;
+
+        // Populate the series using milliseconds since epoch for QDateTimeAxis
+        for (auto it = dateTotals.begin(); it != dateTotals.end(); ++it) {
+            timeSeries->append(it.key().toMSecsSinceEpoch(), it.value());
+            if (it.value() > maxAmount) {
+                maxAmount = it.value();
+            }
+        }
+
+        // Dynamically adjust the X and Y axes ranges so the chart draws properly
+        QDateTime minDate = dateTotals.firstKey();
+        QDateTime maxDate = dateTotals.lastKey();
+
+        // If there's only one date, add some padding to the X-axis so it draws a visible point
+        if (minDate == maxDate) {
+            minDate = minDate.addDays(-1);
+            maxDate = maxDate.addDays(1);
+        }
+
+        axisX->setRange(minDate, maxDate);
+        axisY->setRange(0, maxAmount * 1.1); // Add 10% headroom to the top of the graph
+    }
+}
 void MainWindow::onNewData()
 {
     QMessageBox::StandardButton reply;
@@ -626,7 +702,7 @@ void MainWindow::onFindPrevious()
 void MainWindow::onSelectAllMatches()
 {
     ledgerView->clearSelection();
-    for (const QModelIndex &index : currentMatches) {
+    for (const QModelIndex &index : std::as_const(currentMatches)) {
         ledgerView->selectionModel()->select(index, QItemSelectionModel::Select);
     }
 }
@@ -827,4 +903,9 @@ void MainWindow::onGenerateStats()
                                .arg(topProject).arg(maxProjCount);
 
     QMessageBox::information(this, "Ledger Statistics", statsMessage);
+}
+
+void MainWindow::onChartTypeChanged(int index)
+{
+    chartStack->setCurrentIndex(index);
 }

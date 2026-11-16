@@ -28,6 +28,9 @@
 #include <QAction>
 #include <QKeySequence>
 #include <QLabel>
+#include <QDateTime>
+#include <QStackedWidget>
+#include <utility>
 
 // New Includes for standard application features
 #include <QFileDialog>
@@ -42,6 +45,9 @@
 // QtCharts headers
 #include <QtCharts/QChartView>
 #include <QtCharts/QPieSeries>
+#include <QtCharts/QLineSeries>
+#include <QtCharts/QDateTimeAxis>
+#include <QtCharts/QValueAxis>
 #include <QtCharts/QChart>
 
 class MainWindow : public QMainWindow
@@ -83,6 +89,9 @@ private slots:
     void onCalculateTotalSpending();
     void onGenerateStats();
 
+    // Slot for switching visualizations
+    void onChartTypeChanged(int index);
+
 private:
     // Data Model
     QStandardItemModel *expenseModel;
@@ -109,9 +118,18 @@ private:
     void highlightCurrentMatch();
 
     // Chart Components
-    QChart *expenseChart;
+    QComboBox *chartTypeCombo;
+    QStackedWidget *chartStack;
+
+    QChart *pieChart;
+    QChartView *pieChartView;
     QPieSeries *categorySeries;
-    QChartView *chartView;
+
+    QChart *lineChart;
+    QChartView *lineChartView;
+    QLineSeries *timeSeries;
+    QDateTimeAxis *axisX;
+    QValueAxis *axisY;
 
     void setupFlexibleUI();
     void setupModel();
