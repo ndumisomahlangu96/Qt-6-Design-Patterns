@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 project(finance-manager LANGUAGES CXX)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Charts Xml)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Charts Xml Sql)
 
 qt_standard_project_setup()
 
@@ -18,6 +18,7 @@ target_link_libraries(finance-manager
         Qt::Widgets
         Qt::Charts
         Qt::Xml
+        Qt::Sql
 )
 
 install(TARGETS finance-manager
