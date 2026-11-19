@@ -93,6 +93,12 @@ void MainWindow::setupMenuBar()
     connect(openAction, &QAction::triggered, this, &MainWindow::onOpenFile);
     fileMenu->addAction(openAction);
 
+    // NEW: Save to currently opened file (Ctrl+S)
+    QAction *saveCurrentAction = new QAction(style->standardIcon(QStyle::SP_DialogSaveButton), "Save", this);
+    saveCurrentAction->setShortcut(QKeySequence::Save); // Ctrl+S
+    connect(saveCurrentAction, &QAction::triggered, this, &MainWindow::onSaveCurrentFile);
+    fileMenu->addAction(saveCurrentAction);
+
     QAction *saveAction = new QAction(style->standardIcon(QStyle::SP_ArrowDown), "Save to File ...", this);
     connect(saveAction, &QAction::triggered, this, &MainWindow::onSaveFile);
     fileMenu->addAction(saveAction);
@@ -348,6 +354,34 @@ int MainWindow::getOrInsertForeignKey(const QString &tableName, const QString &v
     return query.lastInsertId().toInt();
 }
 
+bool MainWindow::saveDatabaseToFile(const QString &filePath)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "Save Error", "Could not save to file: " + filePath);
+        return false;
+    }
+
+    QTextStream out(&file);
+    out << "Date,Project/Site,Category,Description,Amount\n";
+
+    QSqlQuery query("SELECT e.date_val, p.name, c.name, e.description, e.amount "
+                    "FROM expenses e "
+                    "JOIN projects p ON e.project_id = p.id "
+                    "JOIN categories c ON e.category_id = c.id");
+
+    while (query.next()) {
+        out << "\"" << query.value(0).toString() << "\",\""
+            << query.value(1).toString() << "\",\""
+            << query.value(2).toString() << "\",\""
+            << query.value(3).toString() << "\",\""
+            << query.value(4).toString() << "\"\n";
+    }
+
+    file.close();
+    return true;
+}
+
 void MainWindow::onAddExpenseClicked()
 {
     QString dateStr = dateEdit->date().toString("yyyy-MM-dd");
@@ -510,6 +544,8 @@ void MainWindow::onOpenFile()
         return;
     }
 
+    currentFilePath = fileName; // <-- Track the opened file path
+
     QTextStream in(&file);
     bool isFirstLine = true;
     db.transaction();
@@ -543,30 +579,29 @@ void MainWindow::onOpenFile()
     statusBar()->showMessage("File imported to database successfully.", 3000);
 }
 
+void MainWindow::onSaveCurrentFile()
+{
+    if (currentFilePath.isEmpty()) {
+        // No file opened yet; fall back to Save As dialog
+        onSaveFile();
+        return;
+    }
+
+    if (saveDatabaseToFile(currentFilePath)) {
+        statusBar()->showMessage("Saved to " + currentFilePath, 3000);
+    }
+}
+
+
 void MainWindow::onSaveFile()
 {
-    QString fileName = QFileDialog::getSaveFileName(this, "Save Expenses Data", QDir::homePath(), "Textfile (*.txt)");
+    QString initialDir = currentFilePath.isEmpty() ? QDir::homePath() : currentFilePath;
+    QString fileName = QFileDialog::getSaveFileName(this, "Save Expenses Data", initialDir, "Textfile (*.txt);;All Files (*)");
     if (fileName.isEmpty()) return;
 
-    QFile file(fileName);
-    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QTextStream out(&file);
-        out << "Date,Project/Site,Category,Description,Amount\n";
-
-        QSqlQuery query("SELECT e.date_val, p.name, c.name, e.description, e.amount "
-                        "FROM expenses e "
-                        "JOIN projects p ON e.project_id = p.id "
-                        "JOIN categories c ON e.category_id = c.id");
-
-        while (query.next()) {
-            out << "\"" << query.value(0).toString() << "\",\""
-                << query.value(1).toString() << "\",\""
-                << query.value(2).toString() << "\",\""
-                << query.value(3).toString() << "\",\""
-                << query.value(4).toString() << "\"\n";
-        }
-        file.close();
-        statusBar()->showMessage("Data save to File successfully.", 3000);
+    if (saveDatabaseToFile(fileName)) {
+        currentFilePath = fileName;
+        statusBar()->showMessage("Data saved to file successfully.", 3000);
     }
 }
 

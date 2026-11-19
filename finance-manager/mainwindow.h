@@ -97,6 +97,7 @@ protected:
 private slots:
     void onAddExpenseClicked();
     void onOpenFile();
+    void onSaveCurrentFile(); // <-- Add this
     void onSaveFile();
     void onClearDatabase();
     void onExit();
@@ -163,5 +164,6 @@ private:
     void setupFlexibleUI();
     void setupMenuBar();
     int getOrInsertForeignKey(const QString &tableName, const QString &value);
+    bool saveDatabaseToFile(const QString &filePath); // <-- Add this
 };
 #endif // MAINWINDOW_H
