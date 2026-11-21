@@ -2,10 +2,6 @@
 
 /**
  * @brief Constructs the MainWindow and bootstraps all application subsystems.
- *
- * Sets up the central widget, initializes the SQLite database and relational
- * table model, builds the tabbed UI and menus/toolbar, and performs an initial
- * render of all dashboard charts.
  */
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -46,9 +42,6 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 /**
  * @brief Opens the local SQLite database and creates the normalized schema if needed.
- *
- * Connects to `expenses.db` in the current working directory and ensures three
- * tables exist: `projects`, `categories`, and `expenses`.
  */
 void MainWindow::setupDatabase()
 {
@@ -75,11 +68,20 @@ void MainWindow::setupDatabase()
 }
 
 /**
- * @brief Configures the relational table model backing the Ledger Reports view.
- *
- * Maps foreign key columns (`project_id` and `category_id`) to display their
- * human-readable names, sets column headers, enables immediate persistence on
- * field edits (`OnFieldChange`), and connects value changes to `updateChart()`.
+ * @brief Fetches all remaining SQLite batches into expenseModel so proxy filtering and charts see 100% of records.
+ */
+void MainWindow::fetchAllModelRows()
+{
+    if (!expenseModel) {
+        return;
+    }
+    while (expenseModel->canFetchMore()) {
+        expenseModel->fetchMore();
+    }
+}
+
+/**
+ * @brief Configures the relational table model and inserts ExpenseFilterProxyModel on top of it.
  */
 void MainWindow::setupModel()
 {
@@ -98,11 +100,18 @@ void MainWindow::setupModel()
 
     expenseModel->setEditStrategy(QSqlTableModel::OnFieldChange);
     expenseModel->select();
+    fetchAllModelRows();
 
-    // Only refresh charts/stats on actual data edits (ignore pure visual-role updates)
+    // Insert custom multi-criteria proxy model between expenseModel and ledgerView
+    expenseProxyModel = new ExpenseFilterProxyModel(this);
+    expenseProxyModel->setSourceModel(expenseModel);
+    expenseProxyModel->setDynamicSortFilter(true);
+
+    // Refresh filter bounds and charts on actual data edits (ignore pure visual-role updates)
     connect(expenseModel, &QSqlTableModel::dataChanged, this,
             [this](const QModelIndex &, const QModelIndex &, const QList<int> &roles) {
                 if (roles.isEmpty() || roles.contains(Qt::DisplayRole) || roles.contains(Qt::EditRole)) {
+                    syncFilterControlsWithDatabase(false);
                     updateChart();
                 }
             });
@@ -110,58 +119,92 @@ void MainWindow::setupModel()
 
 /**
  * @brief Builds the application menu bar (File, Edit, Help) and top toolbar.
- *
- * Registers keyboard shortcuts, assigns standard Qt icons, and adds analytics
- * actions including Total Spending, Ledger Statistics, Statistical Distribution,
- * and Anomaly Detection to the main toolbar.
  */
 void MainWindow::setupMenuBar()
 {
     QStyle *style = QApplication::style();
-
-    // --- File Menu ---
-    QMenu *fileMenu = menuBar()->addMenu("File");
-
+    // --- QAction functions for data manipulation and data analysis ---
     QAction *newAction = new QAction(style->standardIcon(QStyle::SP_FileIcon), "Clear Database", this);
     newAction->setShortcut(QKeySequence::New);
     connect(newAction, &QAction::triggered, this, &MainWindow::onClearDatabase);
-    fileMenu->addAction(newAction);
 
     QAction *openAction = new QAction(style->standardIcon(QStyle::SP_DirOpenIcon), "Open File ...", this);
+    openAction->setShortcut(QKeySequence::Open);
     connect(openAction, &QAction::triggered, this, &MainWindow::onOpenFile);
-    fileMenu->addAction(openAction);
 
     QAction *saveCurrentAction = new QAction(style->standardIcon(QStyle::SP_DialogSaveButton), "Save", this);
-    saveCurrentAction->setShortcut(QKeySequence::Save); // Ctrl+S
+    saveCurrentAction->setShortcut(QKeySequence::Save);
     connect(saveCurrentAction, &QAction::triggered, this, &MainWindow::onSaveCurrentFile);
-    fileMenu->addAction(saveCurrentAction);
 
     QAction *saveAction = new QAction(style->standardIcon(QStyle::SP_ArrowDown), "Save to File ...", this);
     connect(saveAction, &QAction::triggered, this, &MainWindow::onSaveFile);
-    fileMenu->addAction(saveAction);
-
-    fileMenu->addSeparator();
 
     QAction *exitAction = new QAction(style->standardIcon(QStyle::SP_DialogCloseButton), "Exit", this);
     exitAction->setShortcut(QKeySequence::Quit);
     connect(exitAction, &QAction::triggered, this, &MainWindow::onExit);
-    fileMenu->addAction(exitAction);
 
-    // --- Edit Menu ---
-    QMenu *editMenu = menuBar()->addMenu("Edit");
     QAction *deleteAction = new QAction(style->standardIcon(QStyle::SP_TrashIcon), "Delete Selected Record", this);
     deleteAction->setShortcut(QKeySequence::Delete);
     connect(deleteAction, &QAction::triggered, this, &MainWindow::onDeleteSelected);
-    editMenu->addAction(deleteAction);
 
     QAction *sortAction = new QAction(style->standardIcon(QStyle::SP_BrowserReload), "Sort Ledger...", this);
     connect(sortAction, &QAction::triggered, this, &MainWindow::onSortLedger);
-    editMenu->addAction(sortAction);
 
     QAction *findAction = new QAction(QIcon::fromTheme("edit-find-replace", style->standardIcon(QStyle::SP_FileDialogContentsView)), "Find and Replace...", this);
     findAction->setShortcut(QKeySequence::Find);
     connect(findAction, &QAction::triggered, this, &MainWindow::onToggleFindReplace);
-    editMenu->addAction(findAction);
+
+    QAction *totalSpendingAction = new QAction(style->standardIcon(QStyle::SP_DialogApplyButton), "Total Spending", this);
+    connect(totalSpendingAction, &QAction::triggered, this, &MainWindow::onCalculateTotalSpending);
+
+    QAction *statsAction = new QAction(style->standardIcon(QStyle::SP_FileDialogDetailedView), "Ledger Statistics", this);
+    connect(statsAction, &QAction::triggered, this, &MainWindow::onGenerateStats);
+
+    QAction *statDistAction = new QAction(style->standardIcon(QStyle::SP_FileDialogInfoView), "Statistical Distribution", this);
+    connect(statDistAction, &QAction::triggered, this, &MainWindow::onShowStatisticalDistribution);
+
+    anomalyDetectionAction = new QAction(style->standardIcon(QStyle::SP_MessageBoxWarning), "Anomaly Detection", this);
+    anomalyDetectionAction->setCheckable(true);
+    anomalyDetectionAction->setToolTip("Highlight outlier transactions (|x - μ| > 2σ or > Q3 + 1.5×IQR) in the ledger");
+    connect(anomalyDetectionAction, &QAction::toggled, this, &MainWindow::onToggleAnomalyDetection);
+
+    liveFilterAction = new QAction(
+        QIcon::fromTheme("view-filter", style->standardIcon(QStyle::SP_FileDialogListView)),
+        "Live Multi-Criteria Filtering",
+        this);
+    liveFilterAction->setCheckable(true);
+    liveFilterAction->setToolTip("Filter ledger and Visual Dashboard in real time by date range, projects, categories, amount range, and keyword");
+    connect(liveFilterAction, &QAction::toggled, this, &MainWindow::onToggleLiveFiltering);
+
+    // --- File Menu ---
+    QMenu *fileMenu = menuBar()->addMenu("File");
+    fileMenu->addAction(newAction);
+    fileMenu->addAction(openAction);
+    fileMenu->addAction(saveCurrentAction);
+    fileMenu->addAction(saveAction);
+
+    fileMenu->addSeparator();
+
+    fileMenu->addAction(exitAction);
+
+    // --- Edit Menu ---
+    QMenu *editMenu = menuBar()->addMenu("Edit");
+    editMenu->addAction(deleteAction);
+
+    // --- View Menu ---
+    QMenu *viewMenu = menuBar()->addMenu("View");
+    viewMenu->addAction(sortAction);
+    viewMenu->addAction(findAction);
+
+    viewMenu->addSeparator();
+
+    viewMenu->addAction(totalSpendingAction);
+    viewMenu->addAction(statDistAction);
+    viewMenu->addAction(anomalyDetectionAction);
+
+    viewMenu->addSeparator();
+
+    viewMenu->addAction(liveFilterAction);
 
     // --- Help Menu ---
     QMenu *helpMenu = menuBar()->addMenu("Help");
@@ -175,40 +218,160 @@ void MainWindow::setupMenuBar()
     mainToolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     this->addToolBar(Qt::TopToolBarArea, mainToolBar);
 
+    // Basic function for data.
     mainToolBar->addAction(newAction);
-    mainToolBar->addAction(openAction);
+    mainToolBar->addAction(deleteAction);
+
     mainToolBar->addSeparator();
 
-    QAction *totalSpendingAction = new QAction(style->standardIcon(QStyle::SP_DialogApplyButton), "Total Spending", this);
-    connect(totalSpendingAction, &QAction::triggered, this, &MainWindow::onCalculateTotalSpending);
+    // Basic functions for data analysis.
     mainToolBar->addAction(totalSpendingAction);
-
-    QAction *statsAction = new QAction(style->standardIcon(QStyle::SP_FileDialogDetailedView), "Ledger Statistics", this);
-    connect(statsAction, &QAction::triggered, this, &MainWindow::onGenerateStats);
     mainToolBar->addAction(statsAction);
-
-    QAction *statDistAction = new QAction(style->standardIcon(QStyle::SP_FileDialogInfoView), "Statistical Distribution", this);
-    connect(statDistAction, &QAction::triggered, this, &MainWindow::onShowStatisticalDistribution);
     mainToolBar->addAction(statDistAction);
-
-    anomalyDetectionAction = new QAction(style->standardIcon(QStyle::SP_MessageBoxWarning), "Anomaly Detection", this);
-    anomalyDetectionAction->setCheckable(true);
-    anomalyDetectionAction->setToolTip("Highlight outlier transactions (|x - μ| > 2σ or > Q3 + 1.5×IQR) in the ledger");
-    connect(anomalyDetectionAction, &QAction::toggled, this, &MainWindow::onToggleAnomalyDetection);
     mainToolBar->addAction(anomalyDetectionAction);
+
+    mainToolBar->addSeparator();
+
+    // Advanced functions for data analysis.
+    mainToolBar->addAction(liveFilterAction);
 }
 
 /**
- * @brief Constructs the main three-tab user interface inside the central widget.
- *
- * - Tab 1 ("Data Entry"): Input form with regex-validated fields and currency spin box.
- * - Tab 2 ("Ledger Reports"): Editable QTableView paired with a collapsible Find/Replace bar.
- * - Tab 3 ("Visual Dashboard"): Chart selector driving a QStackedWidget of Pie, Line,
- *   and Stacked Bar charts.
+ * @brief Constructs the collapsible Live Multi-Criteria Filter Panel and the three-tab workspace.
  */
 void MainWindow::setupFlexibleUI()
 {
     QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget());
+
+    // =========================================================================
+    // COLLAPSIBLE LIVE MULTI-CRITERIA FILTER PANEL (shared by Ledger & Dashboard)
+    // =========================================================================
+    filterPanelWidget = new QGroupBox("Live Multi-Criteria Filtering (QSortFilterProxyModel)", this);
+    QVBoxLayout *filterOuterLayout = new QVBoxLayout(filterPanelWidget);
+    filterOuterLayout->setSpacing(6);
+
+    // Row 1: Keyword search, Date range (start/end), Match status, Reset
+    QHBoxLayout *filterTopRow = new QHBoxLayout();
+
+    QLabel *keywordLabel = new QLabel("Keyword:");
+    filterKeywordEdit = new QLineEdit();
+    filterKeywordEdit->setPlaceholderText("Search description, project, category, date, or amount...");
+    filterKeywordEdit->setClearButtonEnabled(true);
+    connect(filterKeywordEdit, &QLineEdit::textChanged, this, &MainWindow::onFilterCriteriaChanged);
+
+    filterDateEnabledCheck = new QCheckBox("Date Range:");
+    filterDateEnabledCheck->setChecked(true);
+    connect(filterDateEnabledCheck, &QCheckBox::toggled, this, &MainWindow::onFilterCriteriaChanged);
+
+    filterStartDateEdit = new QDateEdit(QDate::currentDate());
+    filterStartDateEdit->setCalendarPopup(true);
+    filterStartDateEdit->setDisplayFormat("yyyy-MM-dd");
+    connect(filterStartDateEdit, &QDateEdit::dateChanged, this, &MainWindow::onFilterStartDateChanged);
+
+    QLabel *dateToLabel = new QLabel("to");
+
+    filterEndDateEdit = new QDateEdit(QDate::currentDate());
+    filterEndDateEdit->setCalendarPopup(true);
+    filterEndDateEdit->setDisplayFormat("yyyy-MM-dd");
+    connect(filterEndDateEdit, &QDateEdit::dateChanged, this, &MainWindow::onFilterEndDateChanged);
+
+    filterStatusLabel = new QLabel("Showing 0 of 0 records");
+    filterStatusLabel->setStyleSheet("font-weight: bold;");
+
+    QPushButton *resetFiltersBtn = new QPushButton("Reset Filters");
+    connect(resetFiltersBtn, &QPushButton::clicked, this, &MainWindow::onResetFilters);
+
+    filterTopRow->addWidget(keywordLabel);
+    filterTopRow->addWidget(filterKeywordEdit, 2);
+    filterTopRow->addSpacing(10);
+    filterTopRow->addWidget(filterDateEnabledCheck);
+    filterTopRow->addWidget(filterStartDateEdit);
+    filterTopRow->addWidget(dateToLabel);
+    filterTopRow->addWidget(filterEndDateEdit);
+    filterTopRow->addSpacing(10);
+    filterTopRow->addWidget(filterStatusLabel);
+    filterTopRow->addWidget(resetFiltersBtn);
+
+    filterOuterLayout->addLayout(filterTopRow);
+
+    // Row 2: Multi-select Projects, Multi-select Categories, Min/Max Amount Sliders
+    QHBoxLayout *filterBottomRow = new QHBoxLayout();
+
+    // Projects multi-select list
+    QVBoxLayout *projFilterLayout = new QVBoxLayout();
+    QHBoxLayout *projHeaderLayout = new QHBoxLayout();
+    projHeaderLayout->addWidget(new QLabel("Projects:"));
+    projHeaderLayout->addStretch();
+    QPushButton *projAllBtn = new QPushButton("All");
+    QPushButton *projNoneBtn = new QPushButton("None");
+    projAllBtn->setMaximumWidth(45);
+    projNoneBtn->setMaximumWidth(50);
+    connect(projAllBtn, &QPushButton::clicked, this, &MainWindow::onSelectAllProjects);
+    connect(projNoneBtn, &QPushButton::clicked, this, &MainWindow::onClearAllProjects);
+    projHeaderLayout->addWidget(projAllBtn);
+    projHeaderLayout->addWidget(projNoneBtn);
+
+    filterProjectsList = new QListWidget();
+    filterProjectsList->setMaximumHeight(85);
+    filterProjectsList->setSelectionMode(QAbstractItemView::NoSelection);
+    connect(filterProjectsList, &QListWidget::itemChanged, this, &MainWindow::onFilterCriteriaChanged);
+
+    projFilterLayout->addLayout(projHeaderLayout);
+    projFilterLayout->addWidget(filterProjectsList);
+
+    // Categories multi-select list
+    QVBoxLayout *catFilterLayout = new QVBoxLayout();
+    QHBoxLayout *catHeaderLayout = new QHBoxLayout();
+    catHeaderLayout->addWidget(new QLabel("Categories:"));
+    catHeaderLayout->addStretch();
+    QPushButton *catAllBtn = new QPushButton("All");
+    QPushButton *catNoneBtn = new QPushButton("None");
+    catAllBtn->setMaximumWidth(45);
+    catNoneBtn->setMaximumWidth(50);
+    connect(catAllBtn, &QPushButton::clicked, this, &MainWindow::onSelectAllCategories);
+    connect(catNoneBtn, &QPushButton::clicked, this, &MainWindow::onClearAllCategories);
+    catHeaderLayout->addWidget(catAllBtn);
+    catHeaderLayout->addWidget(catNoneBtn);
+
+    filterCategoriesList = new QListWidget();
+    filterCategoriesList->setMaximumHeight(85);
+    filterCategoriesList->setSelectionMode(QAbstractItemView::NoSelection);
+    connect(filterCategoriesList, &QListWidget::itemChanged, this, &MainWindow::onFilterCriteriaChanged);
+
+    catFilterLayout->addLayout(catHeaderLayout);
+    catFilterLayout->addWidget(filterCategoriesList);
+
+    // Min / Max Amount Sliders
+    QGridLayout *amountSliderLayout = new QGridLayout();
+    QLabel *minSliderLabel = new QLabel("Min Amount:");
+    minAmountSlider = new QSlider(Qt::Horizontal);
+    minAmountValueLabel = new QLabel("R 0.00");
+    minAmountValueLabel->setMinimumWidth(90);
+    minAmountValueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    connect(minAmountSlider, &QSlider::valueChanged, this, &MainWindow::onMinAmountSliderChanged);
+
+    QLabel *maxSliderLabel = new QLabel("Max Amount:");
+    maxAmountSlider = new QSlider(Qt::Horizontal);
+    maxAmountValueLabel = new QLabel("R 100.00");
+    maxAmountValueLabel->setMinimumWidth(90);
+    maxAmountValueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    connect(maxAmountSlider, &QSlider::valueChanged, this, &MainWindow::onMaxAmountSliderChanged);
+
+    amountSliderLayout->addWidget(minSliderLabel, 0, 0);
+    amountSliderLayout->addWidget(minAmountSlider, 0, 1);
+    amountSliderLayout->addWidget(minAmountValueLabel, 0, 2);
+    amountSliderLayout->addWidget(maxSliderLabel, 1, 0);
+    amountSliderLayout->addWidget(maxAmountSlider, 1, 1);
+    amountSliderLayout->addWidget(maxAmountValueLabel, 1, 2);
+
+    filterBottomRow->addLayout(projFilterLayout, 1);
+    filterBottomRow->addLayout(catFilterLayout, 1);
+    filterBottomRow->addLayout(amountSliderLayout, 2);
+
+    filterOuterLayout->addLayout(filterBottomRow);
+    filterPanelWidget->setVisible(false);
+    mainLayout->addWidget(filterPanelWidget);
+
     mainTabWidget = new QTabWidget(this);
 
     // =========================================================================
@@ -228,24 +391,18 @@ void MainWindow::setupFlexibleUI()
     categoryCombo = new QComboBox();
     categoryCombo->setEditable(true);
 
-    // Restrict project and category names to alphanumeric characters, spaces, hyphens, and underscores
     QRegularExpression nameRegex("^[a-zA-Z0-9\\s\\-_]+$");
     QRegularExpressionValidator *nameValidator = new QRegularExpressionValidator(nameRegex, this);
     projectCombo->lineEdit()->setValidator(nameValidator);
     categoryCombo->lineEdit()->setValidator(nameValidator);
 
-    // Pre-populate combo boxes with existing projects and categories from the database
-    QSqlQuery q("SELECT name FROM projects");
-    while(q.next()) projectCombo->addItem(q.value(0).toString());
-    q.exec("SELECT name FROM categories");
-    while(q.next()) categoryCombo->addItem(q.value(0).toString());
+    reloadLookupCombos();
 
     amountSpin = new QDoubleSpinBox();
     amountSpin->setMaximum(9999999.99);
     amountSpin->setPrefix("R ");
 
     descriptionEdit = new QLineEdit();
-    // Restrict description text to safe alphanumeric and standard punctuation characters
     QRegularExpression descRegex("^[a-zA-Z0-9\\s\\-_.,'\"()]+$");
     QRegularExpressionValidator *descValidator = new QRegularExpressionValidator(descRegex, this);
     descriptionEdit->setValidator(descValidator);
@@ -270,13 +427,12 @@ void MainWindow::setupFlexibleUI()
     QVBoxLayout *ledgerLayout = new QVBoxLayout(ledgerTab);
 
     ledgerView = new QTableView();
-    ledgerView->setModel(expenseModel);
+    ledgerView->setModel(expenseProxyModel);
     ledgerView->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     ledgerView->setAlternatingRowColors(true);
     ledgerView->hideColumn(0); // Hide the internal auto-increment primary key column
     ledgerLayout->addWidget(ledgerView);
 
-    // Build Find / Replace widget (hidden by default until toggled via Edit -> Find)
     findReplaceWidget = new QWidget();
     QGridLayout *searchLayout = new QGridLayout(findReplaceWidget);
     searchLayout->setContentsMargins(0, 5, 0, 0);
@@ -335,7 +491,7 @@ void MainWindow::setupFlexibleUI()
 
     chartStack = new QStackedWidget();
 
-    // --- Chart 0: Category Pie Chart (clickable for project drill-down) ---
+    // --- Chart 0: Category Pie Chart ---
     categorySeries = new QPieSeries();
     connect(categorySeries, &QPieSeries::clicked, this, &MainWindow::onPieSliceClicked);
     pieChart = new QChart();
@@ -347,7 +503,7 @@ void MainWindow::setupFlexibleUI()
     pieChartView->setRenderHint(QPainter::Antialiasing);
     chartStack->addWidget(pieChartView);
 
-    // --- Chart 1: Cash Flow Line Chart (daily totals over time) ---
+    // --- Chart 1: Cash Flow Line Chart ---
     timeSeries = new QLineSeries();
     timeSeries->setName("Total Expenses");
     lineChart = new QChart();
@@ -371,7 +527,7 @@ void MainWindow::setupFlexibleUI()
     lineChartView->setRenderHint(QPainter::Antialiasing);
     chartStack->addWidget(lineChartView);
 
-    // --- Chart 2: Stacked Bar Chart (expenses by project, segmented by category) ---
+    // --- Chart 2: Stacked Bar Chart ---
     barSeries = new QStackedBarSeries();
     barChart = new QChart();
     barChart->addSeries(barSeries);
@@ -398,7 +554,375 @@ void MainWindow::setupFlexibleUI()
     mainTabWidget->addTab(ledgerTab, "Ledger Reports");
     mainTabWidget->addTab(dashboardTab, "Visual Dashboard");
 
-    mainLayout->addWidget(mainTabWidget);
+    mainLayout->addWidget(mainTabWidget, 1);
+
+    syncFilterControlsWithDatabase(true);
+}
+
+/**
+ * @brief Reloads the Data Entry project/category combo boxes from SQLite.
+ */
+void MainWindow::reloadLookupCombos()
+{
+    if (!projectCombo || !categoryCombo) {
+        return;
+    }
+
+    const QString prevProj = projectCombo->currentText();
+    const QString prevCat = categoryCombo->currentText();
+
+    projectCombo->clear();
+    QSqlQuery q("SELECT name FROM projects ORDER BY name ASC");
+    while (q.next()) {
+        projectCombo->addItem(q.value(0).toString());
+    }
+    if (!prevProj.isEmpty()) {
+        projectCombo->setCurrentText(prevProj);
+    }
+
+    categoryCombo->clear();
+    q.exec("SELECT name FROM categories ORDER BY name ASC");
+    while (q.next()) {
+        categoryCombo->addItem(q.value(0).toString());
+    }
+    if (!prevCat.isEmpty()) {
+        categoryCombo->setCurrentText(prevCat);
+    }
+}
+
+/**
+ * @brief Synchronizes filter lists, date bounds, and amount slider ranges with SQLite contents.
+ */
+void MainWindow::syncFilterControlsWithDatabase(bool resetSelections)
+{
+    if (!filterPanelWidget) {
+        return;
+    }
+
+    // 1. Sync multi-select Projects list
+    {
+        QSet<QString> prevAll;
+        QSet<QString> prevChecked;
+        for (int i = 0; i < filterProjectsList->count(); ++i) {
+            const QListWidgetItem *item = filterProjectsList->item(i);
+            prevAll.insert(item->text());
+            if (item->checkState() == Qt::Checked) {
+                prevChecked.insert(item->text());
+            }
+        }
+        const bool allPreviouslyChecked = prevAll.isEmpty() || (prevChecked.size() == prevAll.size());
+
+        QSignalBlocker blocker(filterProjectsList);
+        filterProjectsList->clear();
+
+        QSqlQuery q("SELECT name FROM projects ORDER BY name ASC");
+        while (q.next()) {
+            const QString name = q.value(0).toString();
+            QListWidgetItem *item = new QListWidgetItem(name, filterProjectsList);
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            const bool isNew = !prevAll.contains(name);
+            const bool checked = resetSelections || allPreviouslyChecked || prevChecked.contains(name) || isNew;
+            item->setCheckState(checked ? Qt::Checked : Qt::Unchecked);
+        }
+    }
+
+    // 2. Sync multi-select Categories list
+    {
+        QSet<QString> prevAll;
+        QSet<QString> prevChecked;
+        for (int i = 0; i < filterCategoriesList->count(); ++i) {
+            const QListWidgetItem *item = filterCategoriesList->item(i);
+            prevAll.insert(item->text());
+            if (item->checkState() == Qt::Checked) {
+                prevChecked.insert(item->text());
+            }
+        }
+        const bool allPreviouslyChecked = prevAll.isEmpty() || (prevChecked.size() == prevAll.size());
+
+        QSignalBlocker blocker(filterCategoriesList);
+        filterCategoriesList->clear();
+
+        QSqlQuery q("SELECT name FROM categories ORDER BY name ASC");
+        while (q.next()) {
+            const QString name = q.value(0).toString();
+            QListWidgetItem *item = new QListWidgetItem(name, filterCategoriesList);
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            const bool isNew = !prevAll.contains(name);
+            const bool checked = resetSelections || allPreviouslyChecked || prevChecked.contains(name) || isNew;
+            item->setCheckState(checked ? Qt::Checked : Qt::Unchecked);
+        }
+    }
+
+    // 3. Query dataset date & amount bounds
+    QDate dbMinDate = QDate::currentDate();
+    QDate dbMaxDate = QDate::currentDate();
+    double dbMaxAmount = 100.0;
+
+    QSqlQuery boundsQuery("SELECT MIN(date_val), MAX(date_val), MAX(amount) FROM expenses");
+    if (boundsQuery.next()) {
+        const QDate minD = QDate::fromString(boundsQuery.value(0).toString(), "yyyy-MM-dd");
+        const QDate maxD = QDate::fromString(boundsQuery.value(1).toString(), "yyyy-MM-dd");
+        if (minD.isValid()) {
+            dbMinDate = minD;
+        }
+        if (maxD.isValid()) {
+            dbMaxDate = maxD;
+        }
+        if (!boundsQuery.value(2).isNull()) {
+            dbMaxAmount = std::max(1.0, boundsQuery.value(2).toDouble());
+        }
+    }
+
+    // 4. Sync Date Range controls
+    if (resetSelections || !dateFilterCustomized) {
+        QSignalBlocker startBlocker(filterStartDateEdit);
+        QSignalBlocker endBlocker(filterEndDateEdit);
+        filterStartDateEdit->setDate(dbMinDate);
+        filterEndDateEdit->setDate(dbMaxDate);
+
+        if (resetSelections) {
+            QSignalBlocker checkBlocker(filterDateEnabledCheck);
+            filterDateEnabledCheck->setChecked(true);
+            dateFilterCustomized = false;
+        }
+    }
+
+    // 5. Sync Min/Max Amount Sliders
+    const bool wasMinAtBottom = (minAmountSlider->maximum() == 0) || (minAmountSlider->value() <= minAmountSlider->minimum());
+    const bool wasMaxAtTop = (maxAmountSlider->maximum() == 0) || (maxAmountSlider->value() >= maxAmountSlider->maximum());
+    const double prevMinVal = minAmountSlider->value() / amountSliderScale;
+    const double prevMaxVal = maxAmountSlider->value() / amountSliderScale;
+
+    amountSliderScale = (dbMaxAmount > 10000000.0) ? 1.0 : 100.0;
+    const int newMaxTicks = std::max(100, static_cast<int>(std::ceil(dbMaxAmount * amountSliderScale)));
+    const int step = std::max(1, static_cast<int>(amountSliderScale));
+    const int pageStep = std::max(step, newMaxTicks / 20);
+
+    {
+        QSignalBlocker minBlocker(minAmountSlider);
+        QSignalBlocker maxBlocker(maxAmountSlider);
+
+        minAmountSlider->setRange(0, newMaxTicks);
+        maxAmountSlider->setRange(0, newMaxTicks);
+        minAmountSlider->setSingleStep(step);
+        minAmountSlider->setPageStep(pageStep);
+        maxAmountSlider->setSingleStep(step);
+        maxAmountSlider->setPageStep(pageStep);
+
+        const int newMinTick = (resetSelections || wasMinAtBottom)
+                                   ? 0
+                                   : std::clamp(static_cast<int>(std::round(prevMinVal * amountSliderScale)), 0, newMaxTicks);
+        const int newMaxTick = (resetSelections || wasMaxAtTop)
+                                   ? newMaxTicks
+                                   : std::clamp(static_cast<int>(std::round(prevMaxVal * amountSliderScale)), newMinTick, newMaxTicks);
+
+        minAmountSlider->setValue(newMinTick);
+        maxAmountSlider->setValue(newMaxTick);
+    }
+    updateAmountSliderLabels();
+
+    if (resetSelections) {
+        QSignalBlocker kwBlocker(filterKeywordEdit);
+        filterKeywordEdit->clear();
+    }
+
+    applyFilterCriteriaToProxy();
+}
+
+/**
+ * @brief Pushes the current UI filter controls into ExpenseFilterProxyModel.
+ */
+void MainWindow::applyFilterCriteriaToProxy()
+{
+    if (!expenseProxyModel || !filterPanelWidget) {
+        return;
+    }
+
+    QSet<QString> selectedProjects;
+    const bool filterProjects = filterProjectsList->count() > 0;
+    for (int i = 0; i < filterProjectsList->count(); ++i) {
+        const QListWidgetItem *item = filterProjectsList->item(i);
+        if (item->checkState() == Qt::Checked) {
+            selectedProjects.insert(item->text());
+        }
+    }
+
+    QSet<QString> selectedCategories;
+    const bool filterCategories = filterCategoriesList->count() > 0;
+    for (int i = 0; i < filterCategoriesList->count(); ++i) {
+        const QListWidgetItem *item = filterCategoriesList->item(i);
+        if (item->checkState() == Qt::Checked) {
+            selectedCategories.insert(item->text());
+        }
+    }
+
+    const double minAmt = minAmountSlider->value() / amountSliderScale;
+    const double maxAmt = maxAmountSlider->value() / amountSliderScale;
+
+    expenseProxyModel->setFilterCriteria(
+        filterDateEnabledCheck->isChecked(),
+        filterStartDateEdit->date(),
+        filterEndDateEdit->date(),
+        filterProjects,
+        selectedProjects,
+        filterCategories,
+        selectedCategories,
+        minAmt,
+        maxAmt,
+        filterKeywordEdit->text());
+
+    updateFilterStatusLabel();
+}
+
+/**
+ * @brief Refreshes the currency labels paired with the Min/Max amount sliders.
+ */
+void MainWindow::updateAmountSliderLabels()
+{
+    if (!minAmountValueLabel || !maxAmountValueLabel) {
+        return;
+    }
+    minAmountValueLabel->setText(QString("R %1").arg(minAmountSlider->value() / amountSliderScale, 0, 'f', 2));
+    maxAmountValueLabel->setText(QString("R %1").arg(maxAmountSlider->value() / amountSliderScale, 0, 'f', 2));
+}
+
+/**
+ * @brief Displays how many ledger records match the active filter slice.
+ */
+void MainWindow::updateFilterStatusLabel()
+{
+    if (!filterStatusLabel || !expenseModel || !expenseProxyModel) {
+        return;
+    }
+    filterStatusLabel->setText(
+        QString("Showing %1 of %2 records")
+            .arg(expenseProxyModel->rowCount())
+            .arg(expenseModel->rowCount()));
+}
+
+/**
+ * @brief Batch-updates check states in a filter QListWidget without redundant repaints.
+ */
+void MainWindow::setListItemsChecked(QListWidget *listWidget, Qt::CheckState state)
+{
+    if (!listWidget) {
+        return;
+    }
+    {
+        QSignalBlocker blocker(listWidget);
+        for (int i = 0; i < listWidget->count(); ++i) {
+            listWidget->item(i)->setCheckState(state);
+        }
+    }
+    onFilterCriteriaChanged();
+}
+
+/**
+ * @brief Toggles the Live Multi-Criteria Filter panel and proxy filtering mode.
+ */
+void MainWindow::onToggleLiveFiltering(bool checked)
+{
+    filterPanelWidget->setVisible(checked);
+    expenseProxyModel->setFilteringEnabled(checked);
+
+    if (checked) {
+        syncFilterControlsWithDatabase(false);
+        onFilterCriteriaChanged();
+        statusBar()->showMessage("Live Multi-Criteria Filtering active.", 3000);
+    } else {
+        updateChart();
+        updateFilterStatusLabel();
+        if (findReplaceWidget && findReplaceWidget->isVisible()) {
+            performSearch();
+        }
+        statusBar()->showMessage("Live Multi-Criteria Filtering disabled (showing all records).", 3000);
+    }
+}
+
+/**
+ * @brief Applies updated filter criteria and refreshes the Visual Dashboard in real time.
+ */
+void MainWindow::onFilterCriteriaChanged()
+{
+    filterStartDateEdit->setEnabled(filterDateEnabledCheck->isChecked());
+    filterEndDateEdit->setEnabled(filterDateEnabledCheck->isChecked());
+
+    applyFilterCriteriaToProxy();
+    updateChart();
+
+    if (findReplaceWidget && findReplaceWidget->isVisible()) {
+        performSearch();
+    }
+}
+
+void MainWindow::onFilterStartDateChanged(const QDate &date)
+{
+    dateFilterCustomized = true;
+    if (date > filterEndDateEdit->date()) {
+        QSignalBlocker blocker(filterEndDateEdit);
+        filterEndDateEdit->setDate(date);
+    }
+    onFilterCriteriaChanged();
+}
+
+void MainWindow::onFilterEndDateChanged(const QDate &date)
+{
+    dateFilterCustomized = true;
+    if (date < filterStartDateEdit->date()) {
+        QSignalBlocker blocker(filterStartDateEdit);
+        filterStartDateEdit->setDate(date);
+    }
+    onFilterCriteriaChanged();
+}
+
+void MainWindow::onMinAmountSliderChanged(int value)
+{
+    if (value > maxAmountSlider->value()) {
+        QSignalBlocker blocker(maxAmountSlider);
+        maxAmountSlider->setValue(value);
+    }
+    updateAmountSliderLabels();
+    onFilterCriteriaChanged();
+}
+
+void MainWindow::onMaxAmountSliderChanged(int value)
+{
+    if (value < minAmountSlider->value()) {
+        QSignalBlocker blocker(minAmountSlider);
+        minAmountSlider->setValue(value);
+    }
+    updateAmountSliderLabels();
+    onFilterCriteriaChanged();
+}
+
+void MainWindow::onResetFilters()
+{
+    syncFilterControlsWithDatabase(true);
+    updateChart();
+    if (findReplaceWidget && findReplaceWidget->isVisible()) {
+        performSearch();
+    }
+    statusBar()->showMessage("All filter criteria reset.", 3000);
+}
+
+void MainWindow::onSelectAllProjects()
+{
+    setListItemsChecked(filterProjectsList, Qt::Checked);
+}
+
+void MainWindow::onClearAllProjects()
+{
+    setListItemsChecked(filterProjectsList, Qt::Unchecked);
+}
+
+void MainWindow::onSelectAllCategories()
+{
+    setListItemsChecked(filterCategoriesList, Qt::Checked);
+}
+
+void MainWindow::onClearAllCategories()
+{
+    setListItemsChecked(filterCategoriesList, Qt::Unchecked);
 }
 
 /**
@@ -454,12 +978,6 @@ bool MainWindow::saveDatabaseToFile(const QString &filePath)
 
 /**
  * @brief Computes a linearly interpolated percentile on a pre-sorted dataset.
- *
- * Uses inclusive linear interpolation: idx = p * (n - 1).
- *
- * @param sortedValues Ascending-sorted numeric sample values.
- * @param percentile   Fractional quantile in [0.0, 1.0] (e.g., 0.25, 0.50, 0.75).
- * @return Interpolated quantile value, or 0.0 if empty.
  */
 double MainWindow::calculatePercentile(const QVector<double> &sortedValues, double percentile)
 {
@@ -479,22 +997,25 @@ double MainWindow::calculatePercentile(const QVector<double> &sortedValues, doub
 }
 
 /**
- * @brief Queries all expense amounts and calculates distribution & anomaly metrics.
- *
- * Computes count, sum, mean (mu), min, max, Q1, median (Q2), Q3, IQR,
- * population standard deviation (sigma), outlier bounds (mu +/- 2*sigma and
- * Q3 + 1.5*IQR), and total flagged outlier count.
+ * @brief Calculates distribution and anomaly metrics from the active ExpenseFilterProxyModel slice.
  */
 ExpenseStats MainWindow::computeExpenseStats() const
 {
     ExpenseStats stats;
-    QSqlQuery q("SELECT amount FROM expenses ORDER BY amount ASC");
-    while (q.next()) {
-        const double val = q.value(0).toDouble();
+    if (!expenseProxyModel) {
+        return stats;
+    }
+
+    const int rowCount = expenseProxyModel->rowCount();
+    stats.sortedAmounts.reserve(rowCount);
+
+    for (int row = 0; row < rowCount; ++row) {
+        const double val = expenseProxyModel->data(expenseProxyModel->index(row, 5), Qt::EditRole).toDouble();
         stats.sortedAmounts.append(val);
         stats.sum += val;
     }
 
+    std::sort(stats.sortedAmounts.begin(), stats.sortedAmounts.end());
     stats.count = stats.sortedAmounts.size();
     if (stats.count == 0) {
         return stats;
@@ -504,13 +1025,11 @@ ExpenseStats MainWindow::computeExpenseStats() const
     stats.max = stats.sortedAmounts.last();
     stats.mean = stats.sum / static_cast<double>(stats.count);
 
-    // Quartiles and Interquartile Range
     stats.q1 = calculatePercentile(stats.sortedAmounts, 0.25);
     stats.median = calculatePercentile(stats.sortedAmounts, 0.50);
     stats.q3 = calculatePercentile(stats.sortedAmounts, 0.75);
     stats.iqr = stats.q3 - stats.q1;
 
-    // Population Standard Deviation (sigma)
     double sumSqDiff = 0.0;
     for (double val : stats.sortedAmounts) {
         const double diff = val - stats.mean;
@@ -518,12 +1037,10 @@ ExpenseStats MainWindow::computeExpenseStats() const
     }
     stats.stdDev = std::sqrt(sumSqDiff / static_cast<double>(stats.count));
 
-    // Anomaly Thresholds
     stats.zLowerThreshold = stats.mean - 2.0 * stats.stdDev;
     stats.zUpperThreshold = stats.mean + 2.0 * stats.stdDev;
     stats.iqrUpperFence = stats.q3 + 1.5 * stats.iqr;
 
-    // Count outlier transactions matching either |x - mu| > 2*sigma or x > Q3 + 1.5*IQR
     constexpr double eps = 1e-9;
     for (double val : stats.sortedAmounts) {
         const bool isZOutlier = (stats.stdDev > eps) && (std::abs(val - stats.mean) > (2.0 * stats.stdDev + eps));
@@ -555,14 +1072,14 @@ void MainWindow::refreshAnomalyHighlighting()
  */
 void MainWindow::onAddExpenseClicked()
 {
-    QString dateStr = dateEdit->date().toString("yyyy-MM-dd");
-    QString projectName = projectCombo->currentText();
-    QString categoryName = categoryCombo->currentText();
-    QString description = descriptionEdit->text();
-    double amount = amountSpin->value();
+    const QString dateStr = dateEdit->date().toString("yyyy-MM-dd");
+    const QString projectName = projectCombo->currentText().trimmed();
+    const QString categoryName = categoryCombo->currentText().trimmed();
+    const QString description = descriptionEdit->text();
+    const double amount = amountSpin->value();
 
-    int projId = getOrInsertForeignKey("projects", projectName);
-    int catId = getOrInsertForeignKey("categories", categoryName);
+    const int projId = getOrInsertForeignKey("projects", projectName);
+    const int catId = getOrInsertForeignKey("categories", categoryName);
 
     QSqlQuery insertQuery;
     insertQuery.prepare("INSERT INTO expenses (date_val, project_id, category_id, description, amount) "
@@ -574,7 +1091,16 @@ void MainWindow::onAddExpenseClicked()
     insertQuery.bindValue(":amt", amount);
 
     if (insertQuery.exec()) {
-        expenseModel->select(); // Refresh the ledger table model
+        if (!projectName.isEmpty() && projectCombo->findText(projectName) == -1) {
+            projectCombo->addItem(projectName);
+        }
+        if (!categoryName.isEmpty() && categoryCombo->findText(categoryName) == -1) {
+            categoryCombo->addItem(categoryName);
+        }
+
+        expenseModel->select();
+        fetchAllModelRows();
+        syncFilterControlsWithDatabase(false);
         updateChart();
         descriptionEdit->clear();
         amountSpin->setValue(0.0);
@@ -585,43 +1111,79 @@ void MainWindow::onAddExpenseClicked()
 }
 
 /**
- * @brief Queries SQLite aggregates, rebuilds all three dashboard charts, and refreshes anomaly highlights.
+ * @brief Aggregates the active filtered slice from ExpenseFilterProxyModel and rebuilds all three dashboard charts.
  */
 void MainWindow::updateChart()
 {
+    if (!expenseProxyModel || !categorySeries || !timeSeries || !barSeries) {
+        return;
+    }
+
+    // Disable chart animations while actively scrubbing sliders for smooth 60fps feedback
+    const bool isScrubbing = (minAmountSlider && minAmountSlider->isSliderDown()) ||
+                             (maxAmountSlider && maxAmountSlider->isSliderDown());
+    const QChart::AnimationOptions animOpt = isScrubbing ? QChart::NoAnimation : QChart::SeriesAnimations;
+    pieChart->setAnimationOptions(animOpt);
+    lineChart->setAnimationOptions(animOpt);
+    barChart->setAnimationOptions(animOpt);
+
+    const bool isFiltered = expenseProxyModel->isFilteringEnabled();
+    pieChart->setTitle(isFiltered ? "Expenses by Category (Filtered)" : "Expenses by Category");
+    lineChart->setTitle(isFiltered ? "Cash Flow Over Time (Filtered)" : "Cash Flow Over Time");
+    barChart->setTitle(isFiltered ? "Expenses Grouped by Project (Filtered)"
+                                  : "Expenses Grouped by Project (Stacked by Category)");
+
     categorySeries->clear();
     timeSeries->clear();
     barSeries->clear();
     barAxisX->clear();
 
-    // 1. Pie Chart: Aggregate spending per category
-    QSqlQuery pieQuery("SELECT c.name, SUM(e.amount) "
-                       "FROM expenses e "
-                       "JOIN categories c ON e.category_id = c.id "
-                       "GROUP BY c.name");
+    QMap<QString, double> categoryTotals;
+    QMap<QDate, double> dailyTotals;
+    QSet<QString> projectSet;
+    QMap<QString, QMap<QString, double>> categoryProjectValues;
+    QMap<QString, double> projectTotals;
 
-    while (pieQuery.next()) {
-        QString cat = pieQuery.value(0).toString();
-        double total = pieQuery.value(1).toDouble();
-        QPieSlice *slice = categorySeries->append(cat, total);
-        slice->setLabelVisible(true);
-        slice->setLabel(QString("%1: R %2").arg(cat).arg(total, 0, 'f', 2));
+    const int rowCount = expenseProxyModel->rowCount();
+    for (int row = 0; row < rowCount; ++row) {
+        const QString dateStr = expenseProxyModel->data(expenseProxyModel->index(row, 1), Qt::DisplayRole).toString();
+        const QString project = expenseProxyModel->data(expenseProxyModel->index(row, 2), Qt::DisplayRole).toString();
+        const QString category = expenseProxyModel->data(expenseProxyModel->index(row, 3), Qt::DisplayRole).toString();
+        const double amount = expenseProxyModel->data(expenseProxyModel->index(row, 5), Qt::EditRole).toDouble();
+
+        categoryTotals[category] += amount;
+
+        const QDate parsedDate = QDate::fromString(dateStr, "yyyy-MM-dd");
+        if (parsedDate.isValid()) {
+            dailyTotals[parsedDate] += amount;
+        }
+
+        projectSet.insert(project);
+        categoryProjectValues[category][project] += amount;
+        projectTotals[project] += amount;
     }
 
-    // 2. Line Chart: Daily spending totals over time
-    QSqlQuery lineQuery("SELECT date_val, SUM(amount) FROM expenses GROUP BY date_val ORDER BY date_val ASC");
-    double maxAmount = 0.0;
-    QDateTime minDate, maxDate;
+    // 1. Pie Chart: Aggregate spending per category
+    for (auto it = categoryTotals.constBegin(); it != categoryTotals.constEnd(); ++it) {
+        QPieSlice *slice = categorySeries->append(it.key(), it.value());
+        slice->setLabelVisible(true);
+        slice->setLabel(QString("%1: R %2").arg(it.key()).arg(it.value(), 0, 'f', 2));
+    }
 
-    while (lineQuery.next()) {
-        QDateTime date = QDateTime::fromString(lineQuery.value(0).toString(), "yyyy-MM-dd");
-        double dailyTotal = lineQuery.value(1).toDouble();
+    // 2. Line Chart: Daily spending totals over time (QMap<QDate, double> is naturally sorted ascending)
+    double maxDailyAmount = 0.0;
+    QDateTime minDate;
+    QDateTime maxDate;
 
-        if (minDate.isNull() || date < minDate) minDate = date;
-        if (maxDate.isNull() || date > maxDate) maxDate = date;
-        if (dailyTotal > maxAmount) maxAmount = dailyTotal;
+    for (auto it = dailyTotals.constBegin(); it != dailyTotals.constEnd(); ++it) {
+        const QDateTime dt(it.key(), QTime(0, 0));
+        const double dailyTotal = it.value();
 
-        timeSeries->append(date.toMSecsSinceEpoch(), dailyTotal);
+        if (minDate.isNull() || dt < minDate) minDate = dt;
+        if (maxDate.isNull() || dt > maxDate) maxDate = dt;
+        if (dailyTotal > maxDailyAmount) maxDailyAmount = dailyTotal;
+
+        timeSeries->append(dt.toMSecsSinceEpoch(), dailyTotal);
     }
 
     if (!minDate.isNull()) {
@@ -630,58 +1192,42 @@ void MainWindow::updateChart()
             maxDate = maxDate.addDays(1);
         }
         axisX->setRange(minDate, maxDate);
-        axisY->setRange(0, maxAmount * 1.1);
+        axisY->setRange(0.0, maxDailyAmount > 0.0 ? maxDailyAmount * 1.1 : 100.0);
+    } else {
+        const QDateTime today(QDate::currentDate(), QTime(0, 0));
+        axisX->setRange(today.addDays(-1), today.addDays(1));
+        axisY->setRange(0.0, 100.0);
     }
 
     // 3. Stacked Bar Chart: Project totals segmented by category
-    QStringList projectNames;
-    QSqlQuery projQuery("SELECT name FROM projects ORDER BY name");
-    while (projQuery.next()) {
-        projectNames << projQuery.value(0).toString();
-    }
+    QStringList projectNames = projectSet.values();
+    std::sort(projectNames.begin(), projectNames.end(), [](const QString &a, const QString &b) {
+        return QString::localeAwareCompare(a, b) < 0;
+    });
 
     if (!projectNames.isEmpty()) {
         barAxisX->append(projectNames);
     } else {
-        barAxisX->append("No Projects");
+        barAxisX->append(isFiltered ? "No Matching Records" : "No Projects");
     }
 
-    QSqlQuery barQuery("SELECT c.name, p.name, SUM(e.amount) "
-                       "FROM expenses e "
-                       "JOIN categories c ON e.category_id = c.id "
-                       "JOIN projects p ON e.project_id = p.id "
-                       "GROUP BY c.name, p.name");
-
-    QMap<QString, QMap<QString, double>> categoryProjectValues;
-    QMap<QString, double> projectTotals;
     double maxBarHeight = 0.0;
-
-    while (barQuery.next()) {
-        QString catName = barQuery.value(0).toString();
-        QString projName = barQuery.value(1).toString();
-        double amount = barQuery.value(2).toDouble();
-
-        categoryProjectValues[catName][projName] = amount;
-        projectTotals[projName] += amount;
-    }
-
     for (double total : std::as_const(projectTotals)) {
-        if (total > maxBarHeight) maxBarHeight = total;
+        if (total > maxBarHeight) {
+            maxBarHeight = total;
+        }
     }
-    barAxisY->setRange(0, maxBarHeight > 0 ? maxBarHeight * 1.1 : 100);
+    barAxisY->setRange(0.0, maxBarHeight > 0.0 ? maxBarHeight * 1.1 : 100.0);
 
     for (auto it = categoryProjectValues.constBegin(); it != categoryProjectValues.constEnd(); ++it) {
-        QString catName = it.key();
-        QBarSet *set = new QBarSet(catName);
-
-        for (const QString &projName : projectNames) {
+        QBarSet *set = new QBarSet(it.key());
+        for (const QString &projName : std::as_const(projectNames)) {
             *set << it.value().value(projName, 0.0);
         }
-
         barSeries->append(set);
     }
 
-    // Keep live anomaly highlights in sync whenever data changes
+    updateFilterStatusLabel();
     refreshAnomalyHighlighting();
 }
 
@@ -697,9 +1243,11 @@ void MainWindow::onClearDatabase()
         q.exec("DELETE FROM categories");
 
         expenseModel->select();
-        updateChart();
+        fetchAllModelRows();
         projectCombo->clear();
         categoryCombo->clear();
+        syncFilterControlsWithDatabase(true);
+        updateChart();
         statusBar()->showMessage("All database records cleared.", 3000);
     }
 }
@@ -749,7 +1297,10 @@ void MainWindow::onOpenFile()
     db.commit();
     file.close();
 
+    reloadLookupCombos();
     expenseModel->select();
+    fetchAllModelRows();
+    syncFilterControlsWithDatabase(false);
     updateChart();
     statusBar()->showMessage("File imported to database successfully.", 3000);
 }
@@ -785,7 +1336,7 @@ void MainWindow::onSaveFile()
 }
 
 /**
- * @brief Triggers window shutdown (delegating cleanup to `closeEvent`).
+ * @brief Triggers window shutdown (delegating cleanup to closeEvent).
  */
 void MainWindow::onExit()
 {
@@ -793,21 +1344,36 @@ void MainWindow::onExit()
 }
 
 /**
- * @brief Deletes all currently selected rows from the Ledger Reports table.
+ * @brief Deletes all currently selected rows from the Ledger Reports table via proxy-to-source mapping.
  */
 void MainWindow::onDeleteSelected()
 {
-    QModelIndexList selectedRows = ledgerView->selectionModel()->selectedRows();
-    if (selectedRows.isEmpty()) {
+    const QModelIndexList selectedProxyRows = ledgerView->selectionModel()->selectedRows();
+    if (selectedProxyRows.isEmpty()) {
         QMessageBox::information(this, "No Selection", "Please select a row in the Ledger Reports tab to delete.");
         return;
     }
 
-    for (int i = selectedRows.count() - 1; i >= 0; i--) {
-        expenseModel->removeRow(selectedRows.at(i).row());
+    QVector<int> sourceRows;
+    sourceRows.reserve(selectedProxyRows.size());
+    for (const QModelIndex &proxyIdx : selectedProxyRows) {
+        const QModelIndex srcIdx = expenseProxyModel->mapToSource(proxyIdx);
+        if (srcIdx.isValid()) {
+            sourceRows.append(srcIdx.row());
+        }
     }
+
+    std::sort(sourceRows.begin(), sourceRows.end(), std::greater<int>());
+    sourceRows.erase(std::unique(sourceRows.begin(), sourceRows.end()), sourceRows.end());
+
+    for (int srcRow : std::as_const(sourceRows)) {
+        expenseModel->removeRow(srcRow);
+    }
+
     expenseModel->submitAll();
     expenseModel->select();
+    fetchAllModelRows();
+    syncFilterControlsWithDatabase(false);
     updateChart();
     statusBar()->showMessage("Record deleted.", 3000);
 }
@@ -821,21 +1387,20 @@ void MainWindow::onAbout()
 }
 
 /**
- * @brief Prompts the user for a column and sort direction, then re-sorts the ledger model.
+ * @brief Prompts the user for a column and sort direction, then re-sorts via ExpenseFilterProxyModel.
  */
 void MainWindow::onSortLedger()
 {
     QStringList columns = {"Date", "Project/Site", "Category", "Description", "Amount"};
-    bool ok;
+    bool ok = false;
     QString item = QInputDialog::getItem(this, "Sort Ledger", "Select variable to sort by:", columns, 0, false, &ok);
 
     if (ok && !item.isEmpty()) {
-        int columnIndex = columns.indexOf(item) + 1;
-        QMessageBox::StandardButton reply = QMessageBox::question(this, "Sort Order",
-                                                                  QString("Sort in Ascending order?"), QMessageBox::Yes | QMessageBox::No);
+        const int columnIndex = columns.indexOf(item) + 1;
+        const QMessageBox::StandardButton reply = QMessageBox::question(
+            this, "Sort Order", QString("Sort in Ascending order?"), QMessageBox::Yes | QMessageBox::No);
 
-        expenseModel->setSort(columnIndex, (reply == QMessageBox::Yes) ? Qt::AscendingOrder : Qt::DescendingOrder);
-        expenseModel->select();
+        expenseProxyModel->sort(columnIndex, (reply == QMessageBox::Yes) ? Qt::AscendingOrder : Qt::DescendingOrder);
     }
 }
 
@@ -857,7 +1422,7 @@ void MainWindow::onToggleFindReplace()
 }
 
 /**
- * @brief Searches all visible ledger cells for case-insensitive matches to `findInput`.
+ * @brief Searches all visible proxy ledger cells for case-insensitive matches to findInput.
  */
 void MainWindow::performSearch()
 {
@@ -865,14 +1430,16 @@ void MainWindow::performSearch()
     currentMatchIndex = -1;
     ledgerView->clearSelection();
 
-    QString targetText = findInput->text();
-    if (targetText.isEmpty()) return;
+    const QString targetText = findInput->text();
+    if (targetText.isEmpty() || !expenseProxyModel) {
+        return;
+    }
 
-    for (int row = 0; row < expenseModel->rowCount(); ++row) {
-        for (int col = 1; col < expenseModel->columnCount(); ++col) {
-            QModelIndex index = expenseModel->index(row, col);
-            if (expenseModel->data(index).toString().contains(targetText, Qt::CaseInsensitive)) {
-                currentMatches.append(index);
+    for (int row = 0; row < expenseProxyModel->rowCount(); ++row) {
+        for (int col = 1; col < expenseProxyModel->columnCount(); ++col) {
+            const QModelIndex proxyIdx = expenseProxyModel->index(row, col);
+            if (expenseProxyModel->data(proxyIdx).toString().contains(targetText, Qt::CaseInsensitive)) {
+                currentMatches.append(proxyIdx);
             }
         }
     }
@@ -889,7 +1456,7 @@ void MainWindow::performSearch()
 void MainWindow::highlightCurrentMatch()
 {
     if (currentMatches.isEmpty() || currentMatchIndex < 0 || currentMatchIndex >= currentMatches.size()) return;
-    QModelIndex index = currentMatches.at(currentMatchIndex);
+    const QModelIndex index = currentMatches.at(currentMatchIndex);
     ledgerView->setCurrentIndex(index);
     ledgerView->scrollTo(index);
 }
@@ -915,7 +1482,7 @@ void MainWindow::onFindPrevious()
 }
 
 /**
- * @brief Highlights every cell in `currentMatches` simultaneously in the table view.
+ * @brief Highlights every cell in currentMatches simultaneously in the table view.
  */
 void MainWindow::onSelectAllMatches()
 {
@@ -926,18 +1493,20 @@ void MainWindow::onSelectAllMatches()
 }
 
 /**
- * @brief Replaces the matched substring inside the currently highlighted cell.
+ * @brief Replaces the matched substring inside the currently highlighted visible cell.
  */
 void MainWindow::onReplace()
 {
     if (currentMatches.isEmpty() || currentMatchIndex < 0 || currentMatchIndex >= currentMatches.size()) return;
 
-    QModelIndex index = currentMatches.at(currentMatchIndex);
-    QString currentText = expenseModel->data(index).toString();
+    const QModelIndex proxyIdx = currentMatches.at(currentMatchIndex);
+    QString currentText = expenseProxyModel->data(proxyIdx).toString();
     currentText.replace(findInput->text(), replaceInput->text(), Qt::CaseInsensitive);
 
-    expenseModel->setData(index, currentText);
+    expenseProxyModel->setData(proxyIdx, currentText);
     expenseModel->submitAll();
+    syncFilterControlsWithDatabase(false);
+    updateChart();
     performSearch();
 }
 
@@ -951,64 +1520,78 @@ void MainWindow::onReplaceAndFind()
 }
 
 /**
- * @brief Replaces all occurrences of `findInput` with `replaceInput` across the ledger.
+ * @brief Replaces all visible occurrences of findInput with replaceInput across the filtered ledger.
  */
 void MainWindow::onReplaceAll()
 {
-    QString targetText = findInput->text();
-    if (targetText.isEmpty()) return;
+    const QString targetText = findInput->text();
+    if (targetText.isEmpty() || !expenseProxyModel) return;
+
+    // Snapshot matching source indices so mid-loop filter changes do not skip rows
+    QList<QPersistentModelIndex> matchedSourceIndices;
+    for (int row = 0; row < expenseProxyModel->rowCount(); ++row) {
+        for (int col = 1; col < expenseProxyModel->columnCount(); ++col) {
+            const QModelIndex proxyIdx = expenseProxyModel->index(row, col);
+            if (expenseProxyModel->data(proxyIdx).toString().contains(targetText, Qt::CaseInsensitive)) {
+                matchedSourceIndices.append(QPersistentModelIndex(expenseProxyModel->mapToSource(proxyIdx)));
+            }
+        }
+    }
 
     int replacedCount = 0;
-    for (int row = 0; row < expenseModel->rowCount(); ++row) {
-        for (int col = 1; col < expenseModel->columnCount(); ++col) {
-            QModelIndex index = expenseModel->index(row, col);
-            QString text = expenseModel->data(index).toString();
-            if (text.contains(targetText, Qt::CaseInsensitive)) {
-                text.replace(targetText, replaceInput->text(), Qt::CaseInsensitive);
-                expenseModel->setData(index, text);
-                replacedCount++;
-            }
+    for (const QPersistentModelIndex &srcIdx : std::as_const(matchedSourceIndices)) {
+        if (!srcIdx.isValid()) {
+            continue;
+        }
+        QString text = expenseModel->data(srcIdx).toString();
+        text.replace(targetText, replaceInput->text(), Qt::CaseInsensitive);
+        if (expenseModel->setData(srcIdx, text)) {
+            replacedCount++;
         }
     }
 
     if (replacedCount > 0) {
         expenseModel->submitAll();
+        syncFilterControlsWithDatabase(false);
+        updateChart();
         statusBar()->showMessage(QString("Successfully replaced %1 occurrence(s).").arg(replacedCount), 5000);
         performSearch();
     }
 }
 
 /**
- * @brief Opens a modal drill-down pie chart showing project spending within a clicked category.
+ * @brief Opens a modal drill-down pie chart showing project spending within a clicked category (respecting active filters).
  */
 void MainWindow::onPieSliceClicked(QPieSlice *slice)
 {
-    QString category = slice->label().section(':', 0, 0).trimmed();
+    const QString category = slice->label().section(':', 0, 0).trimmed();
 
-    QSqlQuery q;
-    q.prepare("SELECT p.name, SUM(e.amount) "
-              "FROM expenses e "
-              "JOIN projects p ON e.project_id = p.id "
-              "JOIN categories c ON e.category_id = c.id "
-              "WHERE c.name = :cat "
-              "GROUP BY p.name");
-    q.bindValue(":cat", category);
-    q.exec();
+    QMap<QString, double> projectTotals;
+    for (int row = 0; row < expenseProxyModel->rowCount(); ++row) {
+        const QString rowCat = expenseProxyModel->data(expenseProxyModel->index(row, 3), Qt::DisplayRole).toString();
+        if (rowCat == category) {
+            const QString rowProj = expenseProxyModel->data(expenseProxyModel->index(row, 2), Qt::DisplayRole).toString();
+            const double amount = expenseProxyModel->data(expenseProxyModel->index(row, 5), Qt::EditRole).toDouble();
+            projectTotals[rowProj] += amount;
+        }
+    }
 
     QDialog *dialog = new QDialog(this);
     dialog->setWindowTitle(category + " - Project Breakdown");
     dialog->resize(500, 400);
 
     QPieSeries *projectSeries = new QPieSeries();
-    while (q.next()) {
-        QPieSlice *pSlice = projectSeries->append(q.value(0).toString(), q.value(1).toDouble());
+    for (auto it = projectTotals.constBegin(); it != projectTotals.constEnd(); ++it) {
+        QPieSlice *pSlice = projectSeries->append(it.key(), it.value());
         pSlice->setLabelVisible(true);
-        pSlice->setLabel(QString("%1: R %2").arg(q.value(0).toString()).arg(q.value(1).toDouble(), 0, 'f', 2));
+        pSlice->setLabel(QString("%1: R %2").arg(it.key()).arg(it.value(), 0, 'f', 2));
     }
 
     QChart *projectChart = new QChart();
     projectChart->addSeries(projectSeries);
-    projectChart->setTitle(QString("Budget Distribution for '%1'").arg(category));
+    projectChart->setTitle(expenseProxyModel->isFilteringEnabled()
+                               ? QString("Budget Distribution for '%1' (Filtered)").arg(category)
+                               : QString("Budget Distribution for '%1'").arg(category));
     projectChart->legend()->setAlignment(Qt::AlignBottom);
 
     QChartView *pChartView = new QChartView(projectChart);
@@ -1026,97 +1609,113 @@ void MainWindow::onPieSliceClicked(QPieSlice *slice)
 }
 
 /**
- * @brief Calculates the grand total of all expenses and displays it to the user.
+ * @brief Calculates the grand total of all visible expenses (respecting active filters).
  */
 void MainWindow::onCalculateTotalSpending()
 {
-    QSqlQuery q("SELECT SUM(amount) FROM expenses");
-    if (q.next()) {
-        QString formattedTotal = QString::number(q.value(0).toDouble(), 'f', 2);
-        statusBar()->showMessage("Total Spending: R " + formattedTotal, 5000);
-        QMessageBox::information(this, "Total Spending", "The total spending for all records is:\n\nR " + formattedTotal);
+    double total = 0.0;
+    for (int row = 0; row < expenseProxyModel->rowCount(); ++row) {
+        total += expenseProxyModel->data(expenseProxyModel->index(row, 5), Qt::EditRole).toDouble();
     }
+
+    const QString formattedTotal = QString::number(total, 'f', 2);
+    const QString scope = expenseProxyModel->isFilteringEnabled() ? "filtered records" : "all records";
+    statusBar()->showMessage("Total Spending (" + scope + "): R " + formattedTotal, 5000);
+    QMessageBox::information(this, "Total Spending",
+                             QString("The total spending for %1 is:\n\nR %2").arg(scope, formattedTotal));
 }
 
 /**
- * @brief Computes expanded descriptive and distributional ledger statistics.
- *
- * Reports count, mean, median, Q1, Q3, IQR, standard deviation (sigma), min, max,
- * outlier thresholds, flagged outlier count, and most frequent category/project.
+ * @brief Computes expanded descriptive and distributional ledger statistics for the active view.
  */
 void MainWindow::onGenerateStats()
 {
     const ExpenseStats stats = computeExpenseStats();
     if (stats.count == 0) {
-        QMessageBox::information(this, "Ledger Statistics", "The ledger is currently empty.");
+        QMessageBox::information(this, "Ledger Statistics", "No matching records to analyze.");
         return;
     }
 
-    QSqlQuery q;
-    // Identify the most frequently occurring category
-    q.exec("SELECT c.name, COUNT(*) as c_count FROM expenses e JOIN categories c ON e.category_id = c.id GROUP BY c.name ORDER BY c_count DESC LIMIT 1");
-    QString topCategory = q.next() ? q.value(0).toString() : "N/A";
-    int maxCatCount = q.value(1).toInt();
+    QMap<QString, int> categoryCounts;
+    QMap<QString, int> projectCounts;
+    for (int row = 0; row < expenseProxyModel->rowCount(); ++row) {
+        projectCounts[expenseProxyModel->data(expenseProxyModel->index(row, 2), Qt::DisplayRole).toString()]++;
+        categoryCounts[expenseProxyModel->data(expenseProxyModel->index(row, 3), Qt::DisplayRole).toString()]++;
+    }
 
-    // Identify the most frequently occurring project
-    q.exec("SELECT p.name, COUNT(*) as p_count FROM expenses e JOIN projects p ON e.project_id = p.id GROUP BY p.name ORDER BY p_count DESC LIMIT 1");
-    QString topProject = q.next() ? q.value(0).toString() : "N/A";
-    int maxProjCount = q.value(1).toInt();
+    QString topCategory = "N/A";
+    int maxCatCount = 0;
+    for (auto it = categoryCounts.constBegin(); it != categoryCounts.constEnd(); ++it) {
+        if (it.value() > maxCatCount) {
+            maxCatCount = it.value();
+            topCategory = it.key();
+        }
+    }
 
-    QString statsMessage = QString(
-                               "<h3>Ledger Statistical Summary</h3>"
-                               "<b>Total Records Analyzed:</b> %1<br>"
-                               "<b>Total Spend:</b> R %2<br><br>"
-                               "<b>Mean (μ):</b> R %3<br>"
-                               "<b>Median (Q2):</b> R %4<br>"
-                               "<b>Standard Deviation (σ):</b> R %5<br>"
-                               "<b>Quartiles (Q1 / Q3):</b> R %6 / R %7<br>"
-                               "<b>Interquartile Range (IQR):</b> R %8<br>"
-                               "<b>Lowest / Highest Expense:</b> R %9 / R %10<br><br>"
-                               "<b>Outlier Upper Bounds:</b> R %11 (μ + 2σ) | R %12 (Q3 + 1.5×IQR)<br>"
-                               "<b>Flagged Anomalies:</b> %13 record(s)<br><br>"
-                               "<b>Most Frequent Category:</b> %14 (%15 entries)<br>"
-                               "<b>Most Frequent Project:</b> %16 (%17 entries)")
-                               .arg(stats.count)
-                               .arg(stats.sum, 0, 'f', 2)
-                               .arg(stats.mean, 0, 'f', 2)
-                               .arg(stats.median, 0, 'f', 2)
-                               .arg(stats.stdDev, 0, 'f', 2)
-                               .arg(stats.q1, 0, 'f', 2)
-                               .arg(stats.q3, 0, 'f', 2)
-                               .arg(stats.iqr, 0, 'f', 2)
-                               .arg(stats.min, 0, 'f', 2)
-                               .arg(stats.max, 0, 'f', 2)
-                               .arg(stats.zUpperThreshold, 0, 'f', 2)
-                               .arg(stats.iqrUpperFence, 0, 'f', 2)
-                               .arg(stats.outlierCount)
-                               .arg(topCategory).arg(maxCatCount)
-                               .arg(topProject).arg(maxProjCount);
+    QString topProject = "N/A";
+    int maxProjCount = 0;
+    for (auto it = projectCounts.constBegin(); it != projectCounts.constEnd(); ++it) {
+        if (it.value() > maxProjCount) {
+            maxProjCount = it.value();
+            topProject = it.key();
+        }
+    }
+
+    const QString heading = expenseProxyModel->isFilteringEnabled()
+                                ? "<h3>Ledger Statistical Summary (Filtered Slice)</h3>"
+                                : "<h3>Ledger Statistical Summary</h3>";
+
+    QString statsMessage = heading + QString(
+                                         "<b>Total Records Analyzed:</b> %1<br>"
+                                         "<b>Total Spend:</b> R %2<br><br>"
+                                         "<b>Mean (μ):</b> R %3<br>"
+                                         "<b>Median (Q2):</b> R %4<br>"
+                                         "<b>Standard Deviation (σ):</b> R %5<br>"
+                                         "<b>Quartiles (Q1 / Q3):</b> R %6 / R %7<br>"
+                                         "<b>Interquartile Range (IQR):</b> R %8<br>"
+                                         "<b>Lowest / Highest Expense:</b> R %9 / R %10<br><br>"
+                                         "<b>Outlier Upper Bounds:</b> R %11 (μ + 2σ) | R %12 (Q3 + 1.5×IQR)<br>"
+                                         "<b>Flagged Anomalies:</b> %13 record(s)<br><br>"
+                                         "<b>Most Frequent Category:</b> %14 (%15 entries)<br>"
+                                         "<b>Most Frequent Project:</b> %16 (%17 entries)")
+                                         .arg(stats.count)
+                                         .arg(stats.sum, 0, 'f', 2)
+                                         .arg(stats.mean, 0, 'f', 2)
+                                         .arg(stats.median, 0, 'f', 2)
+                                         .arg(stats.stdDev, 0, 'f', 2)
+                                         .arg(stats.q1, 0, 'f', 2)
+                                         .arg(stats.q3, 0, 'f', 2)
+                                         .arg(stats.iqr, 0, 'f', 2)
+                                         .arg(stats.min, 0, 'f', 2)
+                                         .arg(stats.max, 0, 'f', 2)
+                                         .arg(stats.zUpperThreshold, 0, 'f', 2)
+                                         .arg(stats.iqrUpperFence, 0, 'f', 2)
+                                         .arg(stats.outlierCount)
+                                         .arg(topCategory).arg(maxCatCount)
+                                         .arg(topProject).arg(maxProjCount);
 
     QMessageBox::information(this, "Ledger Statistics", statsMessage);
 }
 
 /**
  * @brief Displays a dedicated Statistical Distribution dialog with a frequency histogram.
- *
- * Visualizes how expense amounts are distributed across dynamically sized bins
- * alongside quartiles (Q1, Median, Q3), IQR, mean, standard deviation, and skewness.
  */
 void MainWindow::onShowStatisticalDistribution()
 {
     const ExpenseStats stats = computeExpenseStats();
     if (stats.count == 0) {
-        QMessageBox::information(this, "Statistical Distribution", "The ledger is currently empty.");
+        QMessageBox::information(this, "Statistical Distribution", "No matching records to analyze.");
         return;
     }
 
     QDialog *dialog = new QDialog(this);
-    dialog->setWindowTitle("Statistical Distribution Analysis");
+    dialog->setWindowTitle(expenseProxyModel->isFilteringEnabled()
+                               ? "Statistical Distribution Analysis (Filtered Slice)"
+                               : "Statistical Distribution Analysis");
     dialog->resize(720, 520);
 
     QVBoxLayout *layout = new QVBoxLayout(dialog);
 
-    // Determine rough distribution skew based on Mean vs Median
     QString skewLabel = "Approximately Symmetric";
     if (stats.stdDev > 1e-9) {
         if (stats.mean > stats.median + 0.25 * stats.stdDev) {
@@ -1143,7 +1742,6 @@ void MainWindow::onShowStatisticalDistribution()
     summaryLabel->setWordWrap(true);
     layout->addWidget(summaryLabel);
 
-    // Build dynamic histogram bins using Sturges' rule (clamped to 4..10 bins)
     const double range = stats.max - stats.min;
     const int binCount = (range < 1e-9)
                              ? 1
@@ -1184,7 +1782,9 @@ void MainWindow::onShowStatisticalDistribution()
 
     QChart *histChart = new QChart();
     histChart->addSeries(histSeries);
-    histChart->setTitle("Expense Amount Frequency Distribution");
+    histChart->setTitle(expenseProxyModel->isFilteringEnabled()
+                            ? "Expense Amount Frequency Distribution (Filtered)"
+                            : "Expense Amount Frequency Distribution");
     histChart->setAnimationOptions(QChart::SeriesAnimations);
     histChart->legend()->setVisible(false);
 
@@ -1215,12 +1815,6 @@ void MainWindow::onShowStatisticalDistribution()
 
 /**
  * @brief Toggles statistical outlier highlighting in the Ledger Reports table.
- *
- * When enabled, computes mean, standard deviation, and Tukey upper fence (Q3 + 1.5*IQR),
- * switches to the Ledger Reports tab, highlights anomalous rows in ExpenseTableModel,
- * and reports the detection summary.
- *
- * @param checked True to activate anomaly highlighting; false to clear it.
  */
 void MainWindow::onToggleAnomalyDetection(bool checked)
 {
@@ -1232,13 +1826,13 @@ void MainWindow::onToggleAnomalyDetection(bool checked)
 
     const ExpenseStats stats = computeExpenseStats();
     if (stats.count == 0) {
-        QMessageBox::information(this, "Anomaly Detection", "The ledger is currently empty.");
+        QMessageBox::information(this, "Anomaly Detection", "No matching records to analyze.");
         anomalyDetectionAction->setChecked(false);
         return;
     }
 
     expenseModel->setAnomalyThresholds(true, stats.mean, stats.stdDev, stats.iqrUpperFence, true);
-    mainTabWidget->setCurrentIndex(1); // Switch to Ledger Reports tab to show highlights
+    mainTabWidget->setCurrentIndex(1);
 
     const QString summary = QString(
                                 "<h3>Anomaly Detection Active</h3>"
@@ -1265,4 +1859,202 @@ void MainWindow::onToggleAnomalyDetection(bool checked)
 void MainWindow::onChartTypeChanged(int index)
 {
     chartStack->setCurrentIndex(index);
+}
+
+void ExpenseTableModel::setAnomalyThresholds(bool enabled, double mean, double stdDev, double iqrUpperFence, bool valid)
+{
+    highlightAnomalies = enabled;
+    statMean = mean;
+    statStdDev = stdDev;
+    statIqrUpperFence = iqrUpperFence;
+    hasValidStats = valid;
+
+    if (rowCount() > 0 && columnCount() > 0) {
+        emit dataChanged(index(0, 0),
+                         index(rowCount() - 1, columnCount() - 1),
+                         {Qt::BackgroundRole, Qt::ForegroundRole, Qt::ToolTipRole});
+    }
+}
+
+bool ExpenseTableModel::isAmountOutlier(double amount) const
+{
+    if (!hasValidStats) {
+        return false;
+    }
+    constexpr double eps = 1e-9;
+    const bool isZOutlier = (statStdDev > eps) && (std::abs(amount - statMean) > (2.0 * statStdDev + eps));
+    const bool isIqrOutlier = amount > (statIqrUpperFence + eps);
+    return isZOutlier || isIqrOutlier;
+}
+
+QVariant ExpenseTableModel::data(const QModelIndex &index, int role) const
+{
+    if (highlightAnomalies && hasValidStats && index.isValid() &&
+        (role == Qt::BackgroundRole || role == Qt::ForegroundRole || role == Qt::ToolTipRole)) {
+        bool ok = false;
+        const QModelIndex amountIdx = this->index(index.row(), 5);
+        const double amount = QSqlRelationalTableModel::data(amountIdx, Qt::EditRole).toDouble(&ok);
+
+        if (ok && isAmountOutlier(amount)) {
+            if (role == Qt::BackgroundRole) {
+                return QBrush(QColor(255, 220, 220));
+            }
+            if (role == Qt::ForegroundRole) {
+                return QBrush(QColor(135, 0, 0));
+            }
+            if (role == Qt::ToolTipRole) {
+                constexpr double eps = 1e-9;
+                const bool isZOutlier = (statStdDev > eps) && (std::abs(amount - statMean) > (2.0 * statStdDev + eps));
+                const bool isIqrOutlier = amount > (statIqrUpperFence + eps);
+
+                QStringList reasons;
+                if (isZOutlier) {
+                    const double zScore = (amount - statMean) / statStdDev;
+                    reasons << QString("|z| = %1 (> 2σ)").arg(std::abs(zScore), 0, 'f', 2);
+                }
+                if (isIqrOutlier) {
+                    reasons << QString("Exceeds Q3 + 1.5×IQR (R %1)").arg(statIqrUpperFence, 0, 'f', 2);
+                }
+                return QString("Outlier Transaction: %1").arg(reasons.join(" & "));
+            }
+        }
+    }
+    return QSqlRelationalTableModel::data(index, role);
+}
+
+bool ExpenseTableModel::setData(const QModelIndex &index, const QVariant &value, int role)
+{
+    if (role == Qt::EditRole) {
+        if (index.column() == 5) {
+            bool ok = false;
+            const double amount = value.toDouble(&ok);
+            if (!ok || amount < 0.0) {
+                return false;
+            }
+        } else if (index.column() == 2 || index.column() == 3 || index.column() == 4) {
+            if (value.toString().trimmed().isEmpty()) {
+                return false;
+            }
+        }
+    }
+    return QSqlRelationalTableModel::setData(index, value, role);
+}
+
+void ExpenseFilterProxyModel::setFilteringEnabled(bool enabled)
+{
+    if (m_filteringEnabled == enabled) {
+        return;
+    }
+    m_filteringEnabled = enabled;
+    invalidateFilter();
+}
+
+bool ExpenseFilterProxyModel::isFilteringEnabled() const
+{
+    return m_filteringEnabled;
+}
+
+void ExpenseFilterProxyModel::setFilterCriteria(bool useDateRange, const QDate &startDate, const QDate &endDate, bool filterProjects, const QSet<QString> &selectedProjects, bool filterCategories, const QSet<QString> &selectedCategories, double minAmount, double maxAmount, const QString &keyword)
+{
+    m_useDateRange = useDateRange;
+    m_startDate = startDate;
+    m_endDate = endDate;
+    m_filterProjects = filterProjects;
+    m_selectedProjects = selectedProjects;
+    m_filterCategories = filterCategories;
+    m_selectedCategories = selectedCategories;
+    m_minAmount = minAmount;
+    m_maxAmount = maxAmount;
+    m_keyword = keyword.trimmed();
+
+    if (m_filteringEnabled) {
+        invalidateFilter();
+    }
+}
+
+bool ExpenseFilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const
+{
+    if (!m_filteringEnabled || !sourceModel()) {
+        return true;
+    }
+
+    const QModelIndex dateIdx = sourceModel()->index(sourceRow, 1, sourceParent);
+    const QModelIndex projIdx = sourceModel()->index(sourceRow, 2, sourceParent);
+    const QModelIndex catIdx  = sourceModel()->index(sourceRow, 3, sourceParent);
+    const QModelIndex descIdx = sourceModel()->index(sourceRow, 4, sourceParent);
+    const QModelIndex amtIdx  = sourceModel()->index(sourceRow, 5, sourceParent);
+
+    const QString dateStr = sourceModel()->data(dateIdx, Qt::DisplayRole).toString();
+    const QString project = sourceModel()->data(projIdx, Qt::DisplayRole).toString();
+    const QString category = sourceModel()->data(catIdx, Qt::DisplayRole).toString();
+    const QString description = sourceModel()->data(descIdx, Qt::DisplayRole).toString();
+
+    bool amountOk = false;
+    const double amount = sourceModel()->data(amtIdx, Qt::EditRole).toDouble(&amountOk);
+
+    // 1. Date range filter
+    if (m_useDateRange) {
+        const QDate rowDate = QDate::fromString(dateStr, "yyyy-MM-dd");
+        if (!rowDate.isValid()) {
+            return false;
+        }
+        if (m_startDate.isValid() && rowDate < m_startDate) {
+            return false;
+        }
+        if (m_endDate.isValid() && rowDate > m_endDate) {
+            return false;
+        }
+    }
+
+    // 2. Multi-select Projects filter
+    if (m_filterProjects && !m_selectedProjects.contains(project)) {
+        return false;
+    }
+
+    // 3. Multi-select Categories filter
+    if (m_filterCategories && !m_selectedCategories.contains(category)) {
+        return false;
+    }
+
+    // 4. Min/Max Amount range filter
+    constexpr double eps = 1e-9;
+    if (!amountOk || amount < (m_minAmount - eps) || amount > (m_maxAmount + eps)) {
+        return false;
+    }
+
+    // 5. Case-insensitive Keyword search across visible columns
+    if (!m_keyword.isEmpty()) {
+        const QString amountStr = QString::number(amount, 'f', 2);
+        const bool matchesKeyword =
+            dateStr.contains(m_keyword, Qt::CaseInsensitive) ||
+            project.contains(m_keyword, Qt::CaseInsensitive) ||
+            category.contains(m_keyword, Qt::CaseInsensitive) ||
+            description.contains(m_keyword, Qt::CaseInsensitive) ||
+            amountStr.contains(m_keyword, Qt::CaseInsensitive);
+        if (!matchesKeyword) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool ExpenseFilterProxyModel::lessThan(const QModelIndex &sourceLeft, const QModelIndex &sourceRight) const
+{
+    if (sourceLeft.column() == 5) {
+        return sourceModel()->data(sourceLeft, Qt::EditRole).toDouble() <
+               sourceModel()->data(sourceRight, Qt::EditRole).toDouble();
+    }
+    if (sourceLeft.column() == 1) {
+        const QDate leftDate = QDate::fromString(
+            sourceModel()->data(sourceLeft, Qt::DisplayRole).toString(), "yyyy-MM-dd");
+        const QDate rightDate = QDate::fromString(
+            sourceModel()->data(sourceRight, Qt::DisplayRole).toString(), "yyyy-MM-dd");
+        if (leftDate.isValid() && rightDate.isValid()) {
+            return leftDate < rightDate;
+        }
+    }
+    return QString::localeAwareCompare(
+               sourceModel()->data(sourceLeft, Qt::DisplayRole).toString(),
+               sourceModel()->data(sourceRight, Qt::DisplayRole).toString()) < 0;
 }
